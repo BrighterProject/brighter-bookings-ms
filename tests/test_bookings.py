@@ -4,7 +4,7 @@ Full endpoint test suite for /bookings.
 Testing strategy:
   - Auth/scope deps are overridden via conftest.build_app()
   - CRUD methods are patched per-test with AsyncMock (no DB)
-  - VenuesClient is injected as a mock via client_factory(..., venues_client=mock_vc)
+  - PropertiesClient is injected as a mock via client_factory(..., properties_client=mock_vc)
 """
 
 from __future__ import annotations
@@ -20,14 +20,14 @@ from app.scopes import BookingScope
 from .factories import (
     BOOKING_ID,
     CUSTOMER_ID,
-    VENUE_ID,
-    VENUE_OWNER_ID,
+    PROPERTY_ID,
+    PROPERTY_OWNER_ID,
     booking_create_payload,
     booking_response,
     make_customer,
-    make_venue_owner,
+    make_property_owner,
     user_dict,
-    venue_dict,
+    property_dict,
 )
 
 
@@ -59,18 +59,18 @@ class TestListBookings:
             mock_crud.list_bookings = AsyncMock(return_value=[booking_response()])
             resp = admin_client.get("/bookings")
         assert resp.status_code == 200
-        # Admin path: no user_id or venue_owner_id filter
+        # Admin path: no user_id or property_owner_id filter
         _, kwargs = mock_crud.list_bookings.call_args
         assert kwargs.get("user_id") is None
-        assert kwargs.get("venue_owner_id") is None
+        assert kwargs.get("property_owner_id") is None
 
-    def test_venue_owner_sees_venue_bookings(self, owner_client):
+    def test_property_owner_sees_property_bookings(self, owner_client):
         with patch(CRUD_PATH) as mock_crud:
             mock_crud.list_bookings = AsyncMock(return_value=[booking_response()])
             resp = owner_client.get("/bookings")
         assert resp.status_code == 200
         _, kwargs = mock_crud.list_bookings.call_args
-        assert kwargs.get("venue_owner_id") == VENUE_OWNER_ID
+        assert kwargs.get("property_owner_id") == PROPERTY_OWNER_ID
 
     def test_customer_user_id_filter_applied(self, client_factory):
         client = client_factory(make_customer())
@@ -96,7 +96,7 @@ class TestListBookings:
 
     def test_no_relevant_scope_returns_403(self, anon_app):
         async def _no_scope_user():
-            return make_customer(scopes=["venues:read"])  # no bookings scope at all
+            return make_customer(scopes=["properties:read"])  # no bookings scope at all
 
         anon_app.dependency_overrides[get_current_user] = _no_scope_user
         with TestClient(anon_app) as c:
@@ -110,55 +110,55 @@ class TestListBookings:
 
 
 class TestCreateBooking:
-    def _mock_vc(self, venue_status: str = "active") -> MagicMock:
+    def _mock_vc(self, property_status: str = "active") -> MagicMock:
         mock_vc = MagicMock()
-        mock_vc.get_venue = AsyncMock(return_value=venue_dict(status=venue_status))
+        mock_vc.get_property = AsyncMock(return_value=property_dict(status=property_status))
         mock_vc.get_unavailabilities = AsyncMock(return_value=[])
         return mock_vc
 
     def test_success_returns_201(self, client_factory):
-        client = client_factory(make_customer(), venues_client=self._mock_vc())
+        client = client_factory(make_customer(), properties_client=self._mock_vc())
         with patch(CRUD_PATH) as mock_crud:
             mock_crud.create_booking = AsyncMock(return_value=booking_response())
             resp = client.post("/bookings", json=booking_create_payload())
         assert resp.status_code == 201
         assert resp.json()["id"] == str(BOOKING_ID)
 
-    def test_venue_id_forwarded_to_venues_client(self, client_factory):
+    def test_property_id_forwarded_to_properties_client(self, client_factory):
         mock_vc = self._mock_vc()
-        client = client_factory(make_customer(), venues_client=mock_vc)
+        client = client_factory(make_customer(), properties_client=mock_vc)
         with patch(CRUD_PATH) as mock_crud:
             mock_crud.create_booking = AsyncMock(return_value=booking_response())
             client.post("/bookings", json=booking_create_payload())
-        mock_vc.get_venue.assert_awaited_once()
-        called_venue_id = mock_vc.get_venue.call_args[0][0]
-        assert str(called_venue_id) == str(VENUE_ID)
+        mock_vc.get_property.assert_awaited_once()
+        called_property_id = mock_vc.get_property.call_args[0][0]
+        assert str(called_property_id) == str(PROPERTY_ID)
 
-    def test_venue_not_found_returns_404(self, client_factory):
+    def test_property_not_found_returns_404(self, client_factory):
         mock_vc = MagicMock()
-        mock_vc.get_venue = AsyncMock(return_value=None)
-        client = client_factory(make_customer(), venues_client=mock_vc)
+        mock_vc.get_property = AsyncMock(return_value=None)
+        client = client_factory(make_customer(), properties_client=mock_vc)
         resp = client.post("/bookings", json=booking_create_payload())
         assert resp.status_code == 404
-        assert "Venue not found" in resp.json()["detail"]
+        assert "Property not found" in resp.json()["detail"]
 
-    def test_venue_not_active_returns_422(self, client_factory):
+    def test_property_not_active_returns_422(self, client_factory):
         client = client_factory(
-            make_customer(), venues_client=self._mock_vc(venue_status="inactive")
+            make_customer(), properties_client=self._mock_vc(property_status="inactive")
         )
         resp = client.post("/bookings", json=booking_create_payload())
         assert resp.status_code == 422
         assert "not available" in resp.json()["detail"]
 
     def test_invalid_payload_returns_422(self, client_factory):
-        client = client_factory(make_customer(), venues_client=self._mock_vc())
-        resp = client.post("/bookings", json={"venue_id": str(VENUE_ID)})
+        client = client_factory(make_customer(), properties_client=self._mock_vc())
+        resp = client.post("/bookings", json={"property_id": str(PROPERTY_ID)})
         assert resp.status_code == 422
 
     def test_end_before_start_returns_422(self, client_factory):
         from .factories import LATER, NOW
 
-        client = client_factory(make_customer(), venues_client=self._mock_vc())
+        client = client_factory(make_customer(), properties_client=self._mock_vc())
         payload = booking_create_payload(
             start_datetime=LATER.isoformat(), end_datetime=NOW.isoformat()
         )
@@ -170,7 +170,7 @@ class TestCreateBooking:
 
         from .factories import NOW
 
-        client = client_factory(make_customer(), venues_client=self._mock_vc())
+        client = client_factory(make_customer(), properties_client=self._mock_vc())
         payload = booking_create_payload(
             start_datetime=NOW.isoformat(),
             end_datetime=(NOW + timedelta(minutes=30)).isoformat(),
@@ -213,18 +213,18 @@ class TestGetBooking:
             mock_crud.get_booking = AsyncMock(return_value=booking_response())
             resp = admin_client.get(f"/bookings/{BOOKING_ID}")
         assert resp.status_code == 200
-        # Admin path: no user_id or venue_owner_id filter
+        # Admin path: no user_id or property_owner_id filter
         _, kwargs = mock_crud.get_booking.call_args
         assert kwargs.get("user_id") is None
-        assert kwargs.get("venue_owner_id") is None
+        assert kwargs.get("property_owner_id") is None
 
-    def test_venue_owner_gets_booking_for_their_venue(self, owner_client):
+    def test_property_owner_gets_booking_for_their_property(self, owner_client):
         with patch(CRUD_PATH) as mock_crud:
             mock_crud.get_booking = AsyncMock(return_value=booking_response())
             resp = owner_client.get(f"/bookings/{BOOKING_ID}")
         assert resp.status_code == 200
         _, kwargs = mock_crud.get_booking.call_args
-        assert kwargs.get("venue_owner_id") == VENUE_OWNER_ID
+        assert kwargs.get("property_owner_id") == PROPERTY_OWNER_ID
 
     def test_not_found_returns_404(self, customer_client):
         with patch(CRUD_PATH) as mock_crud:
@@ -242,12 +242,12 @@ class TestUpdateBookingStatus:
     """
     Status transitions use get_current_user directly — no pre-built dep override.
     The mock for get_booking must return a BookingResponse Pydantic object
-    because the router accesses .status, .user_id, .venue_owner_id attributes.
+    because the router accesses .status, .user_id, .property_owner_id attributes.
     """
 
-    def test_venue_owner_confirms_pending_booking(self, client_factory):
-        client = client_factory(make_venue_owner())
-        pending = booking_model(status="pending", venue_owner_id=str(VENUE_OWNER_ID))
+    def test_property_owner_confirms_pending_booking(self, client_factory):
+        client = client_factory(make_property_owner())
+        pending = booking_model(status="pending", property_owner_id=str(PROPERTY_OWNER_ID))
         confirmed = booking_response(status="confirmed")
         with patch(CRUD_PATH) as mock_crud:
             mock_crud.get_booking = AsyncMock(return_value=pending)
@@ -273,7 +273,7 @@ class TestUpdateBookingStatus:
         client = client_factory(make_customer())
         pending = booking_model(
             status="pending",
-            venue_owner_id=str(VENUE_OWNER_ID),
+            property_owner_id=str(PROPERTY_OWNER_ID),
             user_id=str(CUSTOMER_ID),
         )
         with patch(CRUD_PATH) as mock_crud:
@@ -288,7 +288,7 @@ class TestUpdateBookingStatus:
         pending = booking_model(
             status="pending",
             user_id=str(CUSTOMER_ID),
-            venue_owner_id=str(VENUE_OWNER_ID),
+            property_owner_id=str(PROPERTY_OWNER_ID),
         )
         cancelled = booking_response(status="cancelled")
         with patch(CRUD_PATH) as mock_crud:
@@ -311,15 +311,15 @@ class TestUpdateBookingStatus:
             )
         assert resp.status_code == 200
 
-    def test_venue_owner_can_refuse_pending_booking(self, client_factory):
-        """Venue owner can cancel (refuse) a pending booking for their own venue."""
+    def test_property_owner_can_refuse_pending_booking(self, client_factory):
+        """Property owner can cancel (refuse) a pending booking for their own property."""
         from uuid import uuid4
 
-        client = client_factory(make_venue_owner())
+        client = client_factory(make_property_owner())
         pending = booking_model(
             status="pending",
             user_id=str(uuid4()),
-            venue_owner_id=str(VENUE_OWNER_ID),
+            property_owner_id=str(PROPERTY_OWNER_ID),
         )
         cancelled = booking_response(status="cancelled")
         with patch(CRUD_PATH) as mock_crud:
@@ -331,17 +331,17 @@ class TestUpdateBookingStatus:
         assert resp.status_code == 200
         assert resp.json()["status"] == "cancelled"
 
-    def test_venue_owner_cannot_cancel_other_venues_booking_returns_403(
+    def test_property_owner_cannot_cancel_other_properties_booking_returns_403(
         self, client_factory
     ):
-        """Venue owner cannot cancel a booking belonging to a different venue."""
+        """Property owner cannot cancel a booking belonging to a different property."""
         from uuid import uuid4
 
-        client = client_factory(make_venue_owner())
+        client = client_factory(make_property_owner())
         pending = booking_model(
             status="pending",
             user_id=str(uuid4()),
-            venue_owner_id=str(uuid4()),  # different owner
+            property_owner_id=str(uuid4()),  # different owner
         )
         with patch(CRUD_PATH) as mock_crud:
             mock_crud.get_booking = AsyncMock(return_value=pending)
@@ -350,10 +350,10 @@ class TestUpdateBookingStatus:
             )
         assert resp.status_code == 403
 
-    def test_venue_owner_completes_confirmed_booking(self, client_factory):
-        client = client_factory(make_venue_owner())
+    def test_property_owner_completes_confirmed_booking(self, client_factory):
+        client = client_factory(make_property_owner())
         confirmed = booking_model(
-            status="confirmed", venue_owner_id=str(VENUE_OWNER_ID)
+            status="confirmed", property_owner_id=str(PROPERTY_OWNER_ID)
         )
         completed = booking_response(status="completed")
         with patch(CRUD_PATH) as mock_crud:
@@ -364,10 +364,10 @@ class TestUpdateBookingStatus:
             )
         assert resp.status_code == 200
 
-    def test_venue_owner_marks_no_show(self, client_factory):
-        client = client_factory(make_venue_owner())
+    def test_property_owner_marks_no_show(self, client_factory):
+        client = client_factory(make_property_owner())
         confirmed = booking_model(
-            status="confirmed", venue_owner_id=str(VENUE_OWNER_ID)
+            status="confirmed", property_owner_id=str(PROPERTY_OWNER_ID)
         )
         no_show = booking_response(status="no_show")
         with patch(CRUD_PATH) as mock_crud:
@@ -423,15 +423,15 @@ class TestUpdateBookingStatus:
 
 
 # ---------------------------------------------------------------------------
-# Enrichment — venue_name / customer_username / owner_username
+# Enrichment — property_name / customer_username / owner_username
 # ---------------------------------------------------------------------------
 
 
 class TestEnrichment:
-    def _mock_vc(self, venues: list[dict] | None = None):
+    def _mock_vc(self, properties: list[dict] | None = None):
         mock = MagicMock()
-        mock.get_by_ids = AsyncMock(return_value=venues or [])
-        mock.get_venue = AsyncMock(return_value=None)
+        mock.get_by_ids = AsyncMock(return_value=properties or [])
+        mock.get_property = AsyncMock(return_value=None)
         mock.get_unavailabilities = AsyncMock(return_value=[])
         return mock
 
@@ -440,22 +440,22 @@ class TestEnrichment:
         mock.get_by_ids = AsyncMock(return_value=users or [])
         return mock
 
-    def test_list_returns_venue_name(self, client_factory):
-        vc = self._mock_vc([venue_dict(name="My Court")])
+    def test_list_returns_property_name(self, client_factory):
+        vc = self._mock_vc([property_dict(name="My Court")])
         uc = self._mock_uc()
-        client = client_factory(make_customer(), venues_client=vc, users_client=uc)
+        client = client_factory(make_customer(), properties_client=vc, users_client=uc)
         with patch(CRUD_PATH) as mock_crud:
             mock_crud.list_bookings = AsyncMock(return_value=[booking_response()])
             resp = client.get("/bookings")
         assert resp.status_code == 200
-        assert resp.json()[0]["venue_name"] == "My Court"
+        assert resp.json()[0]["property_name"] == "My Court"
 
     def test_list_returns_customer_username(self, client_factory):
         vc = self._mock_vc()
         uc = self._mock_uc(
             [user_dict(user_id=CUSTOMER_ID, username="johndoe", full_name="John Doe")]
         )
-        client = client_factory(make_customer(), venues_client=vc, users_client=uc)
+        client = client_factory(make_customer(), properties_client=vc, users_client=uc)
         with patch(CRUD_PATH) as mock_crud:
             mock_crud.list_bookings = AsyncMock(return_value=[booking_response()])
             resp = client.get("/bookings")
@@ -466,9 +466,9 @@ class TestEnrichment:
     def test_list_returns_owner_username(self, client_factory):
         vc = self._mock_vc()
         uc = self._mock_uc(
-            [user_dict(user_id=VENUE_OWNER_ID, username="owner42")]
+            [user_dict(user_id=PROPERTY_OWNER_ID, username="owner42")]
         )
-        client = client_factory(make_customer(), venues_client=vc, users_client=uc)
+        client = client_factory(make_customer(), properties_client=vc, users_client=uc)
         with patch(CRUD_PATH) as mock_crud:
             mock_crud.list_bookings = AsyncMock(return_value=[booking_response()])
             resp = client.get("/bookings")
@@ -480,20 +480,20 @@ class TestEnrichment:
             mock_crud.list_bookings = AsyncMock(return_value=[booking_response()])
             resp = client.get("/bookings")
         data = resp.json()[0]
-        assert data["venue_name"] is None
+        assert data["property_name"] is None
         assert data["customer_username"] is None
         assert data["owner_username"] is None
 
     def test_get_booking_returns_enriched(self, client_factory):
-        vc = self._mock_vc([venue_dict(name="Stadium A")])
+        vc = self._mock_vc([property_dict(name="Stadium A")])
         uc = self._mock_uc([user_dict(user_id=CUSTOMER_ID, username="alice")])
-        client = client_factory(make_customer(), venues_client=vc, users_client=uc)
+        client = client_factory(make_customer(), properties_client=vc, users_client=uc)
         with patch(CRUD_PATH) as mock_crud:
             mock_crud.get_booking = AsyncMock(return_value=booking_response())
             resp = client.get(f"/bookings/{BOOKING_ID}")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["venue_name"] == "Stadium A"
+        assert data["property_name"] == "Stadium A"
         assert data["customer_username"] == "alice"
 
 

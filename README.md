@@ -1,6 +1,6 @@
-# ploshtadka-bookings-ms
+# brighter-bookings-ms
 
-Manages venue bookings and status transitions.
+Manages property bookings and status transitions.
 
 **Port:** `8002` | **Prefix:** `/bookings`
 
@@ -8,7 +8,7 @@ Manages venue bookings and status transitions.
 
 | Method | Path | Scope |
 |---|---|---|
-| `GET` | `/bookings/slots?venue_id=` | Any auth — returns `[{start, end}]` |
+| `GET` | `/bookings/slots?property_id=` | Any auth — returns `[{start, end}]` |
 | `GET` | `/bookings` | `bookings:read` / `bookings:manage` / admin |
 | `POST` | `/bookings` | `bookings:write` |
 | `GET` | `/bookings/{id}` | Same as list |
@@ -18,9 +18,9 @@ Manages venue bookings and status transitions.
 ## Status transitions
 
 ```
-PENDING  → CONFIRMED  (venue owner)   PENDING  → CANCELLED  (customer)
-CONFIRMED → COMPLETED  (venue owner)   CONFIRMED → CANCELLED  (customer)
-CONFIRMED → NO_SHOW    (venue owner)
+PENDING  → CONFIRMED  (property owner)   PENDING  → CANCELLED  (customer)
+CONFIRMED → COMPLETED  (property owner)   CONFIRMED → CANCELLED  (customer)
+CONFIRMED → NO_SHOW    (property owner)
 ```
 
 ## Running
@@ -35,14 +35,14 @@ uv run pytest
 | Variable | Default |
 |---|---|
 | `DB_URL` | `sqlite://:memory:` |
-| `VENUES_MS_URL` | `http://localhost:8001` |
+| `PROPERTIES_MS_URL` | `http://localhost:8001` |
 | `PAYMENTS_MS_URL` | `http://localhost:8003` |
 | `REDIS_URL` | `redis://redis:6379/0` |
 
 ## Notes
 
 - Auth via Traefik headers — no JWT validation here.
-- Calls `venues-ms` to fetch venue owner at booking creation; `venue_owner_id` is then denormalized on the booking.
-- Calls `payments-ms` to issue a refund when a venue owner cancels a confirmed booking.
-- Redis caches `/bookings/slots` keyed by `slots:{venue_id}`, TTL 60s.
+- Calls `properties-ms` to fetch property owner at booking creation; `property_owner_id` is then denormalized on the booking.
+- Calls `payments-ms` to issue a refund when a property owner cancels a confirmed booking.
+- Redis caches `/bookings/slots` keyed by `slots:{property_id}`, TTL 60s.
 - Tests mock CRUD with `AsyncMock`; use `customer_client`/`owner_client`/`admin_client` fixtures.

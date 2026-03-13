@@ -17,28 +17,28 @@ def get_redis() -> Redis:
     return _redis
 
 
-def _slots_key(venue_id: UUID) -> str:
-    return f"slots:{venue_id}"
+def _slots_key(property_id: UUID) -> str:
+    return f"slots:{property_id}"
 
 
-async def get_slots_cache(venue_id: UUID) -> list | None:
+async def get_slots_cache(property_id: UUID) -> list | None:
     try:
-        data = await get_redis().get(_slots_key(venue_id))
+        data = await get_redis().get(_slots_key(property_id))
         return json.loads(data) if data else None
     except Exception:
         logger.warning("Redis get failed — skipping slots cache", exc_info=True)
         return None
 
 
-async def set_slots_cache(venue_id: UUID, slots: list) -> None:
+async def set_slots_cache(property_id: UUID, slots: list) -> None:
     try:
-        await get_redis().setex(_slots_key(venue_id), SLOTS_TTL, json.dumps(slots))
+        await get_redis().setex(_slots_key(property_id), SLOTS_TTL, json.dumps(slots))
     except Exception:
         logger.warning("Redis set failed — skipping slots cache", exc_info=True)
 
 
-async def invalidate_slots_cache(venue_id: UUID) -> None:
+async def invalidate_slots_cache(property_id: UUID) -> None:
     try:
-        await get_redis().delete(_slots_key(venue_id))
+        await get_redis().delete(_slots_key(property_id))
     except Exception:
         logger.warning("Redis invalidate failed for slots cache", exc_info=True)

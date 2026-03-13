@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 env:
-  IMAGE: ghcr.io/ploshtadkabg/ploshtadka-bookings-ms
+  IMAGE: ghcr.io/brighterbg/brighter-bookings-ms
 
 jobs:
   test:

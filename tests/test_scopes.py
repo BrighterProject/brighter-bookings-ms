@@ -13,7 +13,7 @@ class TestBookingScopeValues:
     def test_customer_cancel_scope(self):
         assert BookingScope.CANCEL == "bookings:cancel"
 
-    def test_venue_owner_manage_scope(self):
+    def test_property_owner_manage_scope(self):
         assert BookingScope.MANAGE == "bookings:manage"
 
     def test_admin_super_scope(self):

@@ -7,8 +7,8 @@ class BookingScope(StrEnum):
     WRITE = "bookings:write"  # create a booking
     CANCEL = "bookings:cancel"  # cancel own booking
 
-    # Venue owner scopes
-    MANAGE = "bookings:manage"  # confirm / complete / no_show for own venue's bookings
+    # Property owner scopes
+    MANAGE = "bookings:manage"  # confirm / complete / no_show for own property's bookings
 
     # Admin scopes
     ADMIN = "admin:bookings"
@@ -19,9 +19,9 @@ class BookingScope(StrEnum):
 
 BOOKING_SCOPE_DESCRIPTIONS: dict[str, str] = {
     BookingScope.READ: "View your own bookings.",
-    BookingScope.WRITE: "Create a new booking at a venue.",
+    BookingScope.WRITE: "Create a new booking at a property.",
     BookingScope.CANCEL: "Cancel your own pending or confirmed booking.",
-    BookingScope.MANAGE: "Confirm, complete, or mark no-show on your venue bookings.",
+    BookingScope.MANAGE: "Confirm, complete, or mark no-show on your property bookings.",
     BookingScope.ADMIN_READ: "Read any booking regardless of owner (admin).",
     BookingScope.ADMIN_WRITE: "Modify any booking status (admin).",
     BookingScope.ADMIN_DELETE: "Hard-delete any booking (admin).",

@@ -1,5 +1,5 @@
 """
-Tests for app/deps.py — get_current_user, require_scopes, VenuesClient, etc.
+Tests for app/deps.py — get_current_user, require_scopes, PropertiesClient, etc.
 These tests use the real dep functions (no overrides) to get coverage.
 """
 
@@ -11,14 +11,14 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
 from app.deps import (
-    VenuesClient,
+    PropertiesClient,
     can_read_or_manage_booking,
     get_current_user,
-    get_venues_client,
+    get_properties_client,
 )
 from app.routers.booking import router
 
-from .factories import CUSTOMER_ID, make_customer, make_venue_owner
+from .factories import CUSTOMER_ID, make_customer, make_property_owner
 
 CRUD_PATH = "app.routers.booking.booking_crud"
 
@@ -112,8 +112,8 @@ class TestCanReadOrManageBooking:
                 resp = c.get("/bookings")
         assert resp.status_code == 200
 
-    def test_venue_owner_with_manage_scope_passes(self):
-        app = self._app_for(make_venue_owner())
+    def test_property_owner_with_manage_scope_passes(self):
+        app = self._app_for(make_property_owner())
         with patch(CRUD_PATH) as mock_crud:
             mock_crud.list_bookings = AsyncMock(return_value=[])
             with TestClient(app) as c:
@@ -121,24 +121,24 @@ class TestCanReadOrManageBooking:
         assert resp.status_code == 200
 
     def test_user_with_no_relevant_scope_gets_403(self):
-        app = self._app_for(make_customer(scopes=["venues:read"]))
+        app = self._app_for(make_customer(scopes=["properties:read"]))
         with TestClient(app) as c:
             resp = c.get("/bookings")
         assert resp.status_code == 403
 
 
-class TestGetVenuesClient:
-    def test_returns_venues_client_instance(self):
-        client = get_venues_client()
-        assert isinstance(client, VenuesClient)
+class TestGetPropertiesClient:
+    def test_returns_properties_client_instance(self):
+        client = get_properties_client()
+        assert isinstance(client, PropertiesClient)
 
     def test_same_instance_returned_each_time(self):
-        """get_venues_client returns the module-level singleton."""
-        assert get_venues_client() is get_venues_client()
+        """get_properties_client returns the module-level singleton."""
+        assert get_properties_client() is get_properties_client()
 
     def test_headers_built_from_current_user(self):
         user = make_customer()
-        client = VenuesClient()
+        client = PropertiesClient()
         headers = client._headers(user)
         assert headers["X-User-Id"] == str(user.id)
         assert headers["X-Username"] == user.username
@@ -148,7 +148,7 @@ class TestGetVenuesClient:
         """Accessing ._client triggers the lru_cache factory."""
         import httpx
 
-        client = VenuesClient()
+        client = PropertiesClient()
         http_client = client._client
         assert isinstance(http_client, httpx.AsyncClient)
 

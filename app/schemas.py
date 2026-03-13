@@ -17,7 +17,7 @@ class BookingStatus(StrEnum):
 
 
 class BookingCreate(BaseModel):
-    venue_id: UUID
+    property_id: UUID
     start_datetime: datetime
     end_datetime: datetime
     notes: str | None = Field(default=None, max_length=1000)
@@ -45,8 +45,8 @@ class BookingStatusUpdate(BaseModel):
 
 class BookingResponse(BaseModel):
     id: UUID
-    venue_id: UUID
-    venue_owner_id: UUID
+    property_id: UUID
+    property_owner_id: UUID
     user_id: UUID
     start_datetime: datetime
     end_datetime: datetime
@@ -72,7 +72,7 @@ class BookingSlot(BaseModel):
 class BookingEnriched(BookingResponse):
     """BookingResponse extended with human-readable names from upstream services."""
 
-    venue_name: str | None = None
+    property_name: str | None = None
     customer_username: str | None = None
     customer_full_name: str | None = None
     owner_username: str | None = None
@@ -82,7 +82,7 @@ class BookingEnriched(BookingResponse):
 class BookingFilters(BaseModel):
     """Bind to a FastAPI route via Depends(BookingFilters)."""
 
-    venue_id: UUID | None = None
+    property_id: UUID | None = None
     status: BookingStatus | None = None
 
     # Pagination

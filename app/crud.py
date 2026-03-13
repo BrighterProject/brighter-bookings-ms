@@ -36,14 +36,14 @@ def _overlaps_unavailabilities(
 class BookingCRUD(CRUD[Booking, BookingResponse]):  # type: ignore
     async def _has_db_conflict(
         self,
-        venue_id: UUID,
+        property_id: UUID,
         start: datetime,
         end: datetime,
         exclude_id: UUID | None = None,
     ) -> bool:
         """Return True if an active booking overlaps the given window."""
         qs = Booking.filter(
-            venue_id=venue_id,
+            property_id=property_id,
             status__in=[BookingStatus.PENDING, BookingStatus.CONFIRMED],
             start_datetime__lt=end,
             end_datetime__gt=start,
@@ -54,8 +54,8 @@ class BookingCRUD(CRUD[Booking, BookingResponse]):  # type: ignore
 
     async def create_booking(
         self,
-        venue_id: UUID,
-        venue_owner_id: UUID,
+        property_id: UUID,
+        property_owner_id: UUID,
         user_id: UUID,
         start_datetime: datetime,
         end_datetime: datetime,
@@ -67,13 +67,13 @@ class BookingCRUD(CRUD[Booking, BookingResponse]):  # type: ignore
         """
         Persist a new booking after validating:
           - no DB conflict with existing active bookings (atomic, locked)
-          - no overlap with venue unavailability windows
+          - no overlap with property unavailability windows
         """
         # Check unavailabilities outside the transaction (no DB rows involved)
         if _overlaps_unavailabilities(start_datetime, end_datetime, unavailabilities):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Booking overlaps with a venue unavailability period",
+                detail="Booking overlaps with a property unavailability period",
             )
 
         duration_hours = Decimal(
@@ -84,19 +84,19 @@ class BookingCRUD(CRUD[Booking, BookingResponse]):  # type: ignore
         # Atomic check-then-insert: SELECT FOR UPDATE prevents double-booking
         async with in_transaction():
             if await Booking.filter(
-                venue_id=venue_id,
+                property_id=property_id,
                 status__in=[BookingStatus.PENDING, BookingStatus.CONFIRMED],
                 start_datetime__lt=end_datetime,
                 end_datetime__gt=start_datetime,
             ).select_for_update().exists():
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
-                    detail="Booking conflicts with an existing booking for this venue",
+                    detail="Booking conflicts with an existing booking for this property",
                 )
 
             inst = await Booking.create(
-                venue_id=venue_id,
-                venue_owner_id=venue_owner_id,
+                property_id=property_id,
+                property_owner_id=property_owner_id,
                 user_id=user_id,
                 start_datetime=start_datetime,
                 end_datetime=end_datetime,
@@ -112,13 +112,13 @@ class BookingCRUD(CRUD[Booking, BookingResponse]):  # type: ignore
         self,
         booking_id: UUID,
         user_id: UUID | None = None,
-        venue_owner_id: UUID | None = None,
+        property_owner_id: UUID | None = None,
     ) -> BookingResponse | None:
         if user_id is not None:
             inst = await Booking.get_or_none(id=booking_id, user_id=user_id)
-        elif venue_owner_id is not None:
+        elif property_owner_id is not None:
             inst = await Booking.get_or_none(
-                id=booking_id, venue_owner_id=venue_owner_id
+                id=booking_id, property_owner_id=property_owner_id
             )
         else:
             inst = await Booking.get_or_none(id=booking_id)
@@ -131,16 +131,16 @@ class BookingCRUD(CRUD[Booking, BookingResponse]):  # type: ignore
         self,
         filters: BookingFilters,
         user_id: UUID | None = None,
-        venue_owner_id: UUID | None = None,
+        property_owner_id: UUID | None = None,
     ) -> list[BookingResponse]:
         qs = Booking.all()
 
         if user_id is not None:
             qs = qs.filter(user_id=user_id)
-        if venue_owner_id is not None:
-            qs = qs.filter(venue_owner_id=venue_owner_id)
-        if filters.venue_id is not None:
-            qs = qs.filter(venue_id=filters.venue_id)
+        if property_owner_id is not None:
+            qs = qs.filter(property_owner_id=property_owner_id)
+        if filters.property_id is not None:
+            qs = qs.filter(property_id=filters.property_id)
         if filters.status is not None:
             qs = qs.filter(status=filters.status)
 
@@ -164,10 +164,10 @@ class BookingCRUD(CRUD[Booking, BookingResponse]):  # type: ignore
         await inst.save(update_fields=["status"])
         return BookingResponse.model_validate(inst, from_attributes=True)
 
-    async def list_occupied_slots(self, venue_id: UUID) -> list[BookingSlot]:
-        """Return booked time windows for a venue — no user info exposed."""
+    async def list_occupied_slots(self, property_id: UUID) -> list[BookingSlot]:
+        """Return booked time windows for a property — no user info exposed."""
         bookings = await Booking.filter(
-            venue_id=venue_id,
+            property_id=property_id,
             status__in=[BookingStatus.PENDING, BookingStatus.CONFIRMED],
         ).only("start_datetime", "end_datetime")
         return [BookingSlot.model_validate(b, from_attributes=True) for b in bookings]

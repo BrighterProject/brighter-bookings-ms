@@ -17,12 +17,12 @@ from app.scopes import BookingScope
 # ---------------------------------------------------------------------------
 
 CUSTOMER_ID: UUID = uuid4()
-VENUE_OWNER_ID: UUID = uuid4()
+PROPERTY_OWNER_ID: UUID = uuid4()
 ADMIN_ID: UUID = uuid4()
 OTHER_USER_ID: UUID = uuid4()
 
 BOOKING_ID: UUID = uuid4()
-VENUE_ID: UUID = uuid4()
+PROPERTY_ID: UUID = uuid4()
 
 NOW = datetime(2026, 6, 1, 10, 0, 0, tzinfo=UTC)
 LATER = NOW + timedelta(hours=2)
@@ -37,26 +37,26 @@ def make_customer(
     user_id: UUID = CUSTOMER_ID,
     scopes: list[str] | None = None,
 ) -> CurrentUser:
-    """Customer with read/write/cancel booking scopes and venues:read."""
+    """Customer with read/write/cancel booking scopes and properties:read."""
     if scopes is None:
         scopes = [
             BookingScope.READ,
             BookingScope.WRITE,
             BookingScope.CANCEL,
-            "venues:read",
+            "properties:read",
         ]
     return CurrentUser(id=user_id, username=f"customer_{user_id}", scopes=scopes)
 
 
-def make_venue_owner(
-    user_id: UUID = VENUE_OWNER_ID,
+def make_property_owner(
+    user_id: UUID = PROPERTY_OWNER_ID,
     scopes: list[str] | None = None,
 ) -> CurrentUser:
-    """Venue owner with manage booking scope and venues:read."""
+    """Property owner with manage booking scope and properties:read."""
     if scopes is None:
         scopes = [
             BookingScope.MANAGE,
-            "venues:read",
+            "properties:read",
         ]
     return CurrentUser(id=user_id, username=f"owner_{user_id}", scopes=scopes)
 
@@ -68,7 +68,7 @@ def make_admin() -> CurrentUser:
         username="admin",
         scopes=[
             "admin:scopes",
-            "venues:read",
+            "properties:read",
             BookingScope.READ,
             BookingScope.ADMIN,
             BookingScope.ADMIN_READ,
@@ -86,8 +86,8 @@ def make_admin() -> CurrentUser:
 def booking_response(**overrides) -> dict:
     base = dict(
         id=str(BOOKING_ID),
-        venue_id=str(VENUE_ID),
-        venue_owner_id=str(VENUE_OWNER_ID),
+        property_id=str(PROPERTY_ID),
+        property_owner_id=str(PROPERTY_OWNER_ID),
         user_id=str(CUSTOMER_ID),
         start_datetime=NOW.isoformat(),
         end_datetime=LATER.isoformat(),
@@ -101,11 +101,11 @@ def booking_response(**overrides) -> dict:
     return {**base, **overrides}
 
 
-def venue_dict(**overrides) -> dict:
-    """Minimal venues-ms venue representation used by VenuesClient mocks."""
+def property_dict(**overrides) -> dict:
+    """Minimal properties-ms property representation used by PropertiesClient mocks."""
     base = dict(
-        id=str(VENUE_ID),
-        owner_id=str(VENUE_OWNER_ID),
+        id=str(PROPERTY_ID),
+        owner_id=str(PROPERTY_OWNER_ID),
         name="Test Court",
         status="active",
         price_per_hour="20.00",
@@ -135,7 +135,7 @@ def user_dict(user_id: UUID = CUSTOMER_ID, **overrides) -> dict:
 
 def booking_create_payload(**overrides) -> dict:
     base = dict(
-        venue_id=str(VENUE_ID),
+        property_id=str(PROPERTY_ID),
         start_datetime=NOW.isoformat(),
         end_datetime=LATER.isoformat(),
         notes=None,

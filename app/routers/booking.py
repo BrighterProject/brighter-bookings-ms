@@ -11,14 +11,14 @@ from app.deps import (
     CurrentUser,
     PaymentsClient,
     UsersClient,
-    VenuesClient,
+    PropertiesClient,
     can_admin_delete_booking,
     can_read_or_manage_booking,
     can_write_booking,
     get_current_user,
     get_payments_client,
     get_users_client,
-    get_venues_client,
+    get_properties_client,
 )
 from app.schemas import (
     BookingCreate,
@@ -42,12 +42,12 @@ router = APIRouter(prefix="/bookings", tags=["bookings"])
 async def _enrich(
     bookings: list,
     current_user: CurrentUser,
-    venues_client: VenuesClient,
+    properties_client: PropertiesClient,
     users_client: UsersClient,
 ) -> list[BookingEnriched]:
     """
     Convert a list of raw booking objects into BookingEnriched by fetching
-    venue names and user names from upstream services in parallel.
+    property names and user names from upstream services in parallel.
     Both upstream calls degrade gracefully — enriched fields become None on error.
     """
     if not bookings:
@@ -55,15 +55,15 @@ async def _enrich(
 
     parsed = [BookingResponse.model_validate(b, from_attributes=True) for b in bookings]
 
-    venue_ids = {b.venue_id for b in parsed}
-    user_ids = {b.user_id for b in parsed} | {b.venue_owner_id for b in parsed}
+    property_ids = {b.property_id for b in parsed}
+    user_ids = {b.user_id for b in parsed} | {b.property_owner_id for b in parsed}
 
-    venues_raw, users_raw = await asyncio.gather(
-        venues_client.get_by_ids(venue_ids, current_user),
+    properties_raw, users_raw = await asyncio.gather(
+        properties_client.get_by_ids(property_ids, current_user),
         users_client.get_by_ids(user_ids, current_user),
     )
 
-    venue_map: dict[str, str | None] = {v["id"]: v.get("name") for v in venues_raw}
+    property_map: dict[str, str | None] = {v["id"]: v.get("name") for v in properties_raw}
     user_map: dict[str, dict] = {
         u["id"]: {"username": u.get("username"), "full_name": u.get("full_name")}
         for u in users_raw
@@ -72,11 +72,11 @@ async def _enrich(
     result = []
     for b in parsed:
         customer = user_map.get(str(b.user_id), {})
-        owner = user_map.get(str(b.venue_owner_id), {})
+        owner = user_map.get(str(b.property_owner_id), {})
         result.append(
             BookingEnriched(
                 **b.model_dump(),
-                venue_name=venue_map.get(str(b.venue_id)),
+                property_name=property_map.get(str(b.property_id)),
                 customer_username=customer.get("username"),
                 customer_full_name=customer.get("full_name"),
                 owner_username=owner.get("username"),
@@ -115,18 +115,18 @@ def _assert_transition(
     old_status: BookingStatus,
     new_status: BookingStatus,
     booking_user_id: UUID,
-    booking_venue_owner_id: UUID,
+    booking_property_owner_id: UUID,
     current_user: CurrentUser,
 ) -> None:
     """
     Raise HTTP 400/403 if the transition is invalid or the caller lacks permission.
 
     Rules:
-      pending  → confirmed  : MANAGE + venue owner, OR admin
-      pending  → cancelled  : CANCEL + booker, OR MANAGE + venue owner, OR admin
-      confirmed → completed  : MANAGE + venue owner, OR admin
-      confirmed → cancelled  : CANCEL + booker, OR MANAGE + venue owner, OR admin
-      confirmed → no_show    : MANAGE + venue owner, OR admin
+      pending  → confirmed  : MANAGE + property owner, OR admin
+      pending  → cancelled  : CANCEL + booker, OR MANAGE + property owner, OR admin
+      confirmed → completed  : MANAGE + property owner, OR admin
+      confirmed → cancelled  : CANCEL + booker, OR MANAGE + property owner, OR admin
+      confirmed → no_show    : MANAGE + property owner, OR admin
     """
     if new_status not in _VALID_TRANSITIONS.get(old_status, set()):
         raise HTTPException(
@@ -145,30 +145,30 @@ def _assert_transition(
     if is_admin:
         return
 
-    is_venue_owner = current_user.id == booking_venue_owner_id
+    is_property_owner = current_user.id == booking_property_owner_id
     has_manage = BookingScope.MANAGE in current_user.scopes
 
     if new_status in _MANAGE_STATUSES:
-        if not (has_manage and is_venue_owner):
+        if not (has_manage and is_property_owner):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=(
                     f"Transitioning to '{new_status}' requires "
-                    f"'{BookingScope.MANAGE}' scope and being the venue owner."
+                    f"'{BookingScope.MANAGE}' scope and being the property owner."
                 ),
             )
 
     elif new_status in _CANCEL_STATUSES:
         is_booker = current_user.id == booking_user_id
         has_cancel = BookingScope.CANCEL in current_user.scopes
-        # Either the customer cancels their own booking, or the venue owner refuses it
-        if not ((has_cancel and is_booker) or (has_manage and is_venue_owner)):
+        # Either the customer cancels their own booking, or the property owner refuses it
+        if not ((has_cancel and is_booker) or (has_manage and is_property_owner)):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=(
                     f"Transitioning to '{new_status}' requires "
                     f"'{BookingScope.CANCEL}' scope as the booking owner, "
-                    f"or '{BookingScope.MANAGE}' scope as the venue owner."
+                    f"or '{BookingScope.MANAGE}' scope as the property owner."
                 ),
             )
 
@@ -179,22 +179,22 @@ def _assert_transition(
 
 
 @router.get("/slots", response_model=list[BookingSlot])
-async def get_venue_slots(
-    venue_id: UUID,
+async def get_property_slots(
+    property_id: UUID,
     _: CurrentUser = Depends(get_current_user),
 ) -> list[BookingSlot]:
     """
-    Returns occupied time windows for a venue.
+    Returns occupied time windows for a property.
     Any authenticated user can call this — response contains NO user identity.
     """
-    cached = await get_slots_cache(venue_id)
+    cached = await get_slots_cache(property_id)
     if cached is not None:
-        logger.debug("Cache hit for slots: venue_id={}", venue_id)
+        logger.debug("Cache hit for slots: property_id={}", property_id)
         return [BookingSlot(**s) for s in cached]
 
-    logger.debug("Cache miss for slots: venue_id={}", venue_id)
-    slots = await booking_crud.list_occupied_slots(venue_id)
-    await set_slots_cache(venue_id, [s.model_dump(mode="json") for s in slots])
+    logger.debug("Cache miss for slots: property_id={}", property_id)
+    slots = await booking_crud.list_occupied_slots(property_id)
+    await set_slots_cache(property_id, [s.model_dump(mode="json") for s in slots])
     return slots
 
 
@@ -202,7 +202,7 @@ async def get_venue_slots(
 async def list_bookings(
     filters: BookingFilters = Depends(),
     current_user: CurrentUser = Depends(can_read_or_manage_booking),
-    venues_client: VenuesClient = Depends(get_venues_client),
+    properties_client: PropertiesClient = Depends(get_properties_client),
     users_client: UsersClient = Depends(get_users_client),
 ) -> list[BookingEnriched]:
     is_admin = (
@@ -215,57 +215,57 @@ async def list_bookings(
     if is_admin:
         bookings = await booking_crud.list_bookings(filters=filters)
     elif is_manager:
-        # Venue owners see bookings for their venues regardless of also having
+        # Property owners see bookings for their properties regardless of also having
         # bookings:read (which DEFAULT_OWNER_SCOPES includes for customer use)
         bookings = await booking_crud.list_bookings(
-            filters=filters, venue_owner_id=current_user.id
+            filters=filters, property_owner_id=current_user.id
         )
     else:
         bookings = await booking_crud.list_bookings(
             filters=filters, user_id=current_user.id
         )
 
-    return await _enrich(bookings, current_user, venues_client, users_client)
+    return await _enrich(bookings, current_user, properties_client, users_client)
 
 
 @router.post("/", response_model=BookingResponse, status_code=status.HTTP_201_CREATED)
 async def create_booking(
     payload: BookingCreate,
     current_user: CurrentUser = Depends(can_write_booking),
-    venues_client: VenuesClient = Depends(get_venues_client),
+    properties_client: PropertiesClient = Depends(get_properties_client),
 ) -> BookingResponse:
-    # 1. Validate venue exists and is ACTIVE
-    venue = await venues_client.get_venue(payload.venue_id, current_user)
-    if venue is None:
+    # 1. Validate property exists and is ACTIVE
+    property = await properties_client.get_property(payload.property_id, current_user)
+    if property is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Venue not found",
+            detail="Property not found",
         )
-    if venue.get("status") != "active":
+    if property.get("status") != "active":
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=(
-                f"Venue is not available for booking (status: {venue.get('status')})"
+                f"Property is not available for booking (status: {property.get('status')})"
             ),
         )
 
     # 2. Fetch unavailabilities and check for conflicts in CRUD
-    unavailabilities = await venues_client.get_unavailabilities(
-        payload.venue_id, current_user
+    unavailabilities = await properties_client.get_unavailabilities(
+        payload.property_id, current_user
     )
 
     booking = await booking_crud.create_booking(
-        venue_id=payload.venue_id,
-        venue_owner_id=UUID(venue["owner_id"]),
+        property_id=payload.property_id,
+        property_owner_id=UUID(property["owner_id"]),
         user_id=current_user.id,
         start_datetime=payload.start_datetime,
         end_datetime=payload.end_datetime,
-        price_per_hour=Decimal(str(venue["price_per_hour"])),
-        currency=venue.get("currency", "EUR"),
+        price_per_hour=Decimal(str(property["price_per_hour"])),
+        currency=property.get("currency", "EUR"),
         notes=payload.notes,
         unavailabilities=unavailabilities,
     )
-    await invalidate_slots_cache(payload.venue_id)
+    await invalidate_slots_cache(payload.property_id)
     return booking
 
 
@@ -273,7 +273,7 @@ async def create_booking(
 async def get_booking(
     booking_id: UUID,
     current_user: CurrentUser = Depends(can_read_or_manage_booking),
-    venues_client: VenuesClient = Depends(get_venues_client),
+    properties_client: PropertiesClient = Depends(get_properties_client),
     users_client: UsersClient = Depends(get_users_client),
 ) -> BookingEnriched:
     is_admin = (
@@ -287,7 +287,7 @@ async def get_booking(
         booking = await booking_crud.get_booking(booking_id)
     elif is_manager:
         booking = await booking_crud.get_booking(
-            booking_id, venue_owner_id=current_user.id
+            booking_id, property_owner_id=current_user.id
         )
     else:
         booking = await booking_crud.get_booking(booking_id, user_id=current_user.id)
@@ -297,7 +297,7 @@ async def get_booking(
             status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found"
         )
 
-    results = await _enrich([booking], current_user, venues_client, users_client)
+    results = await _enrich([booking], current_user, properties_client, users_client)
     return results[0]
 
 
@@ -319,7 +319,7 @@ async def update_booking_status(
         old_status=booking.status,
         new_status=payload.status,
         booking_user_id=booking.user_id,
-        booking_venue_owner_id=booking.venue_owner_id,
+        booking_property_owner_id=booking.property_owner_id,
         current_user=current_user,
     )
 
@@ -329,9 +329,9 @@ async def update_booking_status(
             status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found"
         )
 
-    await invalidate_slots_cache(booking.venue_id)
+    await invalidate_slots_cache(booking.property_id)
 
-    # Trigger Stripe refund when the venue owner (or admin) cancels a paid booking.
+    # Trigger Stripe refund when the property owner (or admin) cancels a paid booking.
     # Customer cancellations do NOT refund — per the no-refund policy for customers.
     # Failure to refund does not block the cancellation response.
     if payload.status == BookingStatus.CANCELLED:
@@ -339,8 +339,8 @@ async def update_booking_status(
             BookingScope.ADMIN in current_user.scopes
             or BookingScope.ADMIN_WRITE in current_user.scopes
         )
-        is_venue_owner = current_user.id == booking.venue_owner_id
-        if is_admin or is_venue_owner:
+        is_property_owner = current_user.id == booking.property_owner_id
+        if is_admin or is_property_owner:
             await payments_client.refund_booking(booking_id, current_user)
 
     return updated

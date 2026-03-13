@@ -17,7 +17,7 @@ from app.scopes import BOOKING_SCOPE_DESCRIPTIONS, BookingScope
 oauth2_scheme = OAuth2PasswordBearer(
     tokenUrl=f"{settings.users_ms_url}/auth/token",
     scopes={
-        "venues:read": "Browse and search public venue listings.",
+        "properties:read": "Browse and search public property listings.",
         **BOOKING_SCOPE_DESCRIPTIONS,
     },
 )
@@ -105,7 +105,7 @@ async def can_read_or_manage_booking(
     """
     Passes if the user can read bookings (customer/admin) OR manage bookings (owner).
     - bookings:read   → customer sees own bookings
-    - bookings:manage → venue owner sees bookings for their venues
+    - bookings:manage → property owner sees bookings for their properties
     - admin:bookings* → admin sees all
     """
     has_read = BookingScope.READ in current_user.scopes
@@ -119,7 +119,7 @@ async def can_read_or_manage_booking(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=(
                 f"Requires '{BookingScope.READ}' (customers), "
-                f"'{BookingScope.MANAGE}' (venue owners), "
+                f"'{BookingScope.MANAGE}' (property owners), "
                 f"or '{BookingScope.ADMIN_READ}' (admin)."
             ),
         )
@@ -127,28 +127,28 @@ async def can_read_or_manage_booking(
 
 
 # ---------------------------------------------------------------------------
-# VenuesClient — thin async wrapper around venues-ms internal API
+# PropertiesClient — thin async wrapper around properties-ms internal API
 # ---------------------------------------------------------------------------
 
 
 @lru_cache(maxsize=1)
-def _get_venues_http_client() -> httpx.AsyncClient:
+def _get_properties_http_client() -> httpx.AsyncClient:
     return httpx.AsyncClient(
-        base_url=settings.venues_ms_url,
+        base_url=settings.properties_ms_url,
         timeout=httpx.Timeout(5.0),
         follow_redirects=True,
     )
 
 
-class VenuesClient:
+class PropertiesClient:
     """
-    Thin async wrapper around the venues-ms internal API.
-    Forwards Traefik-injected user headers so venues-ms auth deps work normally.
+    Thin async wrapper around the properties-ms internal API.
+    Forwards Traefik-injected user headers so properties-ms auth deps work normally.
     """
 
     @property
     def _client(self) -> httpx.AsyncClient:
-        return _get_venues_http_client()
+        return _get_properties_http_client()
 
     def _headers(self, user: CurrentUser) -> dict[str, str]:
         return {
@@ -157,42 +157,42 @@ class VenuesClient:
             "X-User-Scopes": " ".join(user.scopes),
         }
 
-    async def get_venue(self, venue_id: UUID, user: CurrentUser) -> dict | None:
-        """Returns venue dict or None if 404. Raises HTTPException on other errors."""
+    async def get_property(self, property_id: UUID, user: CurrentUser) -> dict | None:
+        """Returns property dict or None if 404. Raises HTTPException on other errors."""
         resp = await self._client.get(
-            f"/venues/{venue_id}", headers=self._headers(user)
+            f"/properties/{property_id}", headers=self._headers(user)
         )
         if resp.status_code == 404:
             return None
         if resp.status_code >= 400:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"venues-ms returned {resp.status_code}",
+                detail=f"properties-ms returned {resp.status_code}",
             )
         return resp.json()
 
     async def get_unavailabilities(
-        self, venue_id: UUID, user: CurrentUser
+        self, property_id: UUID, user: CurrentUser
     ) -> list[dict]:
-        """Returns list of unavailability windows for the venue."""
+        """Returns list of unavailability windows for the property."""
         resp = await self._client.get(
-            f"/venues/{venue_id}/unavailabilities", headers=self._headers(user)
+            f"/properties/{property_id}/unavailabilities", headers=self._headers(user)
         )
         if resp.status_code >= 400:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"venues-ms returned {resp.status_code} for unavailabilities",
+                detail=f"properties-ms returned {resp.status_code} for unavailabilities",
             )
         return resp.json()
 
-    async def get_by_ids(self, venue_ids: set[UUID], user: CurrentUser) -> list[dict]:
-        """Bulk-fetch venue list items by ID for name enrichment. Fails silently."""
-        if not venue_ids:
+    async def get_by_ids(self, property_ids: set[UUID], user: CurrentUser) -> list[dict]:
+        """Bulk-fetch property list items by ID for name enrichment. Fails silently."""
+        if not property_ids:
             return []
         try:
-            params = [("ids", str(vid)) for vid in venue_ids]
+            params = [("ids", str(vid)) for vid in property_ids]
             resp = await self._client.get(
-                "/venues/bulk", params=params, headers=self._headers(user)
+                "/properties/bulk", params=params, headers=self._headers(user)
             )
             if resp.status_code >= 400 or not resp.content:
                 return []
@@ -201,11 +201,11 @@ class VenuesClient:
             return []
 
 
-_venues_client = VenuesClient()
+_properties_client = PropertiesClient()
 
 
-def get_venues_client() -> VenuesClient:
-    return _venues_client
+def get_properties_client() -> PropertiesClient:
+    return _properties_client
 
 
 # ---------------------------------------------------------------------------
@@ -279,7 +279,7 @@ def _get_payments_http_client() -> httpx.AsyncClient:
 class PaymentsClient:
     """
     Thin async wrapper around payments-ms internal API.
-    Called by bookings-ms when a venue owner cancels a booking so that
+    Called by bookings-ms when a property owner cancels a booking so that
     payments-ms can issue the corresponding Stripe refund.
     Forwards the caller's headers so payments-ms auth works normally.
     Failures are swallowed — refund failure must not block the cancellation.

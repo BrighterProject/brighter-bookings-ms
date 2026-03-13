@@ -5,8 +5,8 @@ from tortoise import fields
 
 
 class BookingStatus(StrEnum):
-    PENDING = "pending"  # just created, awaiting venue owner confirmation
-    CONFIRMED = "confirmed"  # venue owner accepted
+    PENDING = "pending"  # just created, awaiting property owner confirmation
+    CONFIRMED = "confirmed"  # property owner accepted
     COMPLETED = "completed"  # booking period elapsed, marked done
     CANCELLED = "cancelled"  # cancelled by customer or admin
     NO_SHOW = "no_show"  # customer didn't show up
@@ -15,8 +15,8 @@ class BookingStatus(StrEnum):
 class Booking(Model):
     id = fields.UUIDField(primary_key=True)
 
-    venue_id = fields.UUIDField()
-    venue_owner_id = fields.UUIDField()  # denormalized snapshot from venues-ms
+    property_id = fields.UUIDField()
+    property_owner_id = fields.UUIDField()  # denormalized snapshot from properties-ms
     user_id = fields.UUIDField()  # the customer who made the booking
 
     start_datetime = fields.DatetimeField()

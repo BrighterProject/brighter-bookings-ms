@@ -18,20 +18,20 @@ from app.deps import (
     get_current_user,
     get_payments_client,
     get_users_client,
-    get_venues_client,
+    get_properties_client,
 )
 from app.routers.booking import router
 
-from .factories import make_admin, make_customer, make_venue_owner
+from .factories import make_admin, make_customer, make_property_owner
 
 # ---------------------------------------------------------------------------
 # Default no-op client mocks — prevent real HTTP calls in tests
 # ---------------------------------------------------------------------------
 
 
-def _noop_venues_client():
+def _noop_properties_client():
     mock = MagicMock()
-    mock.get_venue = AsyncMock(return_value=None)
+    mock.get_property = AsyncMock(return_value=None)
     mock.get_unavailabilities = AsyncMock(return_value=[])
     mock.get_by_ids = AsyncMock(return_value=[])
     return mock
@@ -54,12 +54,12 @@ def _noop_payments_client():
 # ---------------------------------------------------------------------------
 
 
-def build_app(current_user, venues_client=None, users_client=None, payments_client=None) -> FastAPI:
+def build_app(current_user, properties_client=None, users_client=None, payments_client=None) -> FastAPI:
     """
     Fresh FastAPI app with auth/scope dependencies overridden to return
     `current_user` unconditionally.
 
-    Pass `venues_client` / `users_client` to inject custom mocks.
+    Pass `properties_client` / `users_client` to inject custom mocks.
     Defaults to no-op mocks that return empty lists, avoiding real HTTP calls.
     """
     app = FastAPI()
@@ -76,10 +76,10 @@ def build_app(current_user, venues_client=None, users_client=None, payments_clie
     ):
         app.dependency_overrides[dep] = _user
 
-    vc = venues_client if venues_client is not None else _noop_venues_client()
+    vc = properties_client if properties_client is not None else _noop_properties_client()
     uc = users_client if users_client is not None else _noop_users_client()
     pc = payments_client if payments_client is not None else _noop_payments_client()
-    app.dependency_overrides[get_venues_client] = lambda: vc
+    app.dependency_overrides[get_properties_client] = lambda: vc
     app.dependency_overrides[get_users_client] = lambda: uc
     app.dependency_overrides[get_payments_client] = lambda: pc
 
@@ -98,7 +98,7 @@ def customer_client():
 
 @pytest.fixture()
 def owner_client():
-    return TestClient(build_app(make_venue_owner()), raise_server_exceptions=True)
+    return TestClient(build_app(make_property_owner()), raise_server_exceptions=True)
 
 
 @pytest.fixture()
@@ -121,14 +121,14 @@ def anon_app():
 def client_factory():
     def _make(
         current_user,
-        venues_client=None,
+        properties_client=None,
         users_client=None,
         payments_client=None,
     ) -> TestClient:
         return TestClient(
             build_app(
                 current_user,
-                venues_client=venues_client,
+                properties_client=properties_client,
                 users_client=users_client,
                 payments_client=payments_client,
             ),
