@@ -59,7 +59,7 @@ class BookingCRUD(CRUD[Booking, BookingResponse]):  # type: ignore
         user_id: UUID,
         start_datetime: datetime,
         end_datetime: datetime,
-        price_per_hour: Decimal,
+        price_per_night: Decimal,
         currency: str,
         notes: str | None,
         unavailabilities: list[dict],
@@ -76,10 +76,8 @@ class BookingCRUD(CRUD[Booking, BookingResponse]):  # type: ignore
                 detail="Booking overlaps with a property unavailability period",
             )
 
-        duration_hours = Decimal(
-            str((end_datetime - start_datetime).total_seconds() / 3600)
-        )
-        total_price = (price_per_hour * duration_hours).quantize(Decimal("0.01"))
+        num_nights = Decimal((end_datetime.date() - start_datetime.date()).days)
+        total_price = (price_per_night * num_nights).quantize(Decimal("0.01"))
 
         # Atomic check-then-insert: SELECT FOR UPDATE prevents double-booking
         async with in_transaction():
@@ -100,7 +98,7 @@ class BookingCRUD(CRUD[Booking, BookingResponse]):  # type: ignore
                 user_id=user_id,
                 start_datetime=start_datetime,
                 end_datetime=end_datetime,
-                price_per_hour=price_per_hour,
+                price_per_night=price_per_night,
                 total_price=total_price,
                 currency=currency,
                 notes=notes,

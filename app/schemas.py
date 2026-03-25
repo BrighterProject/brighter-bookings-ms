@@ -33,9 +33,9 @@ class BookingCreate(BaseModel):
     def validate_time_range(self) -> BookingCreate:
         if self.end_datetime <= self.start_datetime:
             raise ValueError("end_datetime must be after start_datetime")
-        duration_seconds = (self.end_datetime - self.start_datetime).total_seconds()
-        if duration_seconds < 3600:
-            raise ValueError("Booking duration must be at least 1 hour")
+        nights = (self.end_datetime.date() - self.start_datetime.date()).days
+        if nights < 1:
+            raise ValueError("Booking must be at least 1 night")
         return self
 
 
@@ -51,7 +51,7 @@ class BookingResponse(BaseModel):
     start_datetime: datetime
     end_datetime: datetime
     status: BookingStatus
-    price_per_hour: Decimal
+    price_per_night: Decimal
     total_price: Decimal
     currency: str
     notes: str | None

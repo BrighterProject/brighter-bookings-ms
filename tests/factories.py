@@ -24,8 +24,8 @@ OTHER_USER_ID: UUID = uuid4()
 BOOKING_ID: UUID = uuid4()
 PROPERTY_ID: UUID = uuid4()
 
-NOW = datetime(2026, 6, 1, 10, 0, 0, tzinfo=UTC)
-LATER = NOW + timedelta(hours=2)
+NOW = datetime(2026, 6, 1, 14, 0, 0, tzinfo=UTC)  # check-in time
+LATER = NOW + timedelta(days=2)  # 2-night stay
 
 
 # ---------------------------------------------------------------------------
@@ -92,8 +92,8 @@ def booking_response(**overrides) -> dict:
         start_datetime=NOW.isoformat(),
         end_datetime=LATER.isoformat(),
         status="pending",
-        price_per_hour="20.00",
-        total_price="40.00",
+        price_per_night="50.00",
+        total_price="100.00",
         currency="EUR",
         notes=None,
         updated_at=NOW.isoformat(),
@@ -106,9 +106,9 @@ def property_dict(**overrides) -> dict:
     base = dict(
         id=str(PROPERTY_ID),
         owner_id=str(PROPERTY_OWNER_ID),
-        name="Test Court",
+        name="Test Property",
         status="active",
-        price_per_hour="20.00",
+        price_per_night="50.00",
         currency="EUR",
     )
     return {**base, **overrides}

@@ -24,7 +24,7 @@ class Booking(Model):
 
     status = fields.CharEnumField(BookingStatus, default=BookingStatus.PENDING)
 
-    price_per_hour = fields.DecimalField(
+    price_per_night = fields.DecimalField(
         max_digits=8, decimal_places=2
     )  # snapshot at booking time
     total_price = fields.DecimalField(max_digits=10, decimal_places=2)  # computed

@@ -93,13 +93,19 @@ Terminal states: `COMPLETED`, `CANCELLED`, `NO_SHOW` — no further transitions 
 
 ## Anonymous slots endpoint
 
-`GET /bookings/slots?property_id=<uuid>` — returns `[{start_datetime, end_datetime}]` for all PENDING+CONFIRMED bookings at a property. **No user identity exposed.** Requires any valid auth token (blocks anonymous scraping). Used by the frontend booking grid to show occupied cells without revealing who booked them.
+`GET /bookings/slots?property_id=<uuid>` — returns `[{start_datetime, end_datetime}]` for all PENDING+CONFIRMED bookings at a property. **No user identity exposed.** Requires any valid auth token (blocks anonymous scraping). Used by the frontend booking form to show occupied date ranges without revealing who booked them.
 
 `BookingSlot` schema: only `start_datetime` + `end_datetime`. Define it **before** `/{booking_id}` routes in the router to avoid FastAPI matching "slots" as a UUID path param.
 
 ## Booking model
 
+Fields: `id`, `property_id`, `property_owner_id`, `user_id`, `start_datetime`, `end_datetime`, `status`, `price_per_night`, `total_price`, `currency`, `notes`, `updated_at`.
+
 `property_owner_id` is denormalized from properties-ms at booking creation time to avoid cross-service lookups on every status update. Do not expose it as a writable field.
+
+### Pricing model
+
+Nightly pricing: `total_price = price_per_night × num_nights` where `num_nights = (end_date - start_date).days`. Minimum 1 night. `price_per_night` is copied from the property at creation time.
 
 ## Testing conventions
 
