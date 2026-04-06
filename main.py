@@ -4,13 +4,18 @@ import uvicorn as uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from ms_core import setup_app
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
+from app.limiter import limiter
 from app.logging import setup_logging
 from app.settings import db_url
 
 setup_logging()
 
 application = FastAPI(title="brighter-bookings-ms", redirect_slashes=False)
+application.state.limiter = limiter
+application.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 application.add_middleware(
     CORSMiddleware,

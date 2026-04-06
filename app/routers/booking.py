@@ -2,11 +2,12 @@ import asyncio
 from decimal import Decimal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from loguru import logger
 
 from app.cache import get_slots_cache, invalidate_slots_cache, set_slots_cache
 from app.crud import booking_crud
+from app.limiter import limiter
 from app.deps import (
     CurrentUser,
     PaymentsClient,
@@ -179,13 +180,15 @@ def _assert_transition(
 
 
 @router.get("/slots", response_model=list[BookingSlot])
+@limiter.limit("60/minute")
 async def get_property_slots(
+    request: Request,
     property_id: UUID,
-    _: CurrentUser = Depends(get_current_user),
 ) -> list[BookingSlot]:
     """
     Returns occupied time windows for a property.
-    Any authenticated user can call this — response contains NO user identity.
+    Public endpoint — response contains NO user identity.
+    Rate limited to 60 requests/minute per IP.
     """
     cached = await get_slots_cache(property_id)
     if cached is not None:

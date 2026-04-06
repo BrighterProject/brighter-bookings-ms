@@ -93,13 +93,15 @@ Terminal states: `COMPLETED`, `CANCELLED`, `NO_SHOW` — no further transitions 
 
 ## Anonymous slots endpoint
 
-`GET /bookings/slots?property_id=<uuid>` — returns `[{start_datetime, end_datetime}]` for all PENDING+CONFIRMED bookings at a property. **No user identity exposed.** Requires any valid auth token (blocks anonymous scraping). Used by the frontend booking form to show occupied date ranges without revealing who booked them.
+`GET /bookings/slots?property_id=<uuid>` — returns `[{start_datetime, end_datetime}]` for all PENDING+CONFIRMED bookings at a property. **No user identity exposed. Public — no auth required.** Rate limited to 60 requests/minute per IP via `slowapi` + Redis (`app/limiter.py`). Used by the frontend booking form to show occupied date ranges without revealing who booked them.
 
 `BookingSlot` schema: only `start_datetime` + `end_datetime`. Define it **before** `/{booking_id}` routes in the router to avoid FastAPI matching "slots" as a UUID path param.
 
 ## Booking model
 
 Fields: `id`, `property_id`, `property_owner_id`, `user_id`, `start_datetime`, `end_datetime`, `status`, `price_per_night`, `total_price`, `currency`, `notes`, `updated_at`.
+
+`notes` stores JSON-encoded guest information (name, contact details, special requests) submitted at booking time. It is opaque to booking logic — treat it as a blob.
 
 `property_owner_id` is denormalized from properties-ms at booking creation time to avoid cross-service lookups on every status update. Do not expose it as a writable field.
 
@@ -112,7 +114,8 @@ Nightly pricing: `total_price = price_per_night × num_nights` where `num_nights
 - **Mock the CRUD layer** with `AsyncMock` — no DB (router tests)
 - **Mock PropertiesClient** via `client_factory(..., properties_client=mock_vc)` dependency override
 - Status transition tests: use `booking_model(**overrides)` (Pydantic object) for `get_booking` mock, since the router accesses `.status`, `.user_id`, `.property_owner_id` attributes
-- Use `anon_app` for real scope/auth dep checks (403/422 assertions)
+- Use `anon_app` for real scope/auth dep checks (403/422 assertions) — also used for public endpoints like `/slots`
+- Rate limiting is disabled in tests via `SLOWAPI_NO_LIMITS=true` set at the top of `conftest.py`
 
 ```python
 # Router test pattern

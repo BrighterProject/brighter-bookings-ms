@@ -5,12 +5,18 @@ No imports needed in test files — pytest discovers this by convention.
 
 from __future__ import annotations
 
+import os
+
+# Disable slowapi rate limiting in tests — must be set before app.limiter is imported.
+os.environ["SLOWAPI_NO_LIMITS"] = "true"
+
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.limiter import limiter
 from app.deps import (
     can_admin_delete_booking,
     can_read_or_manage_booking,
@@ -64,6 +70,7 @@ def build_app(current_user, properties_client=None, users_client=None, payments_
     """
     app = FastAPI()
     app.include_router(router)
+    app.state.limiter = limiter
 
     async def _user():
         return current_user
@@ -114,6 +121,7 @@ def anon_app():
     """
     app = FastAPI()
     app.include_router(router)
+    app.state.limiter = limiter
     return app
 
 

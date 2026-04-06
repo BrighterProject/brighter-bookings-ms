@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 
 from app.deps import get_current_user
-from app.schemas import BookingResponse
+from app.schemas import BookingResponse, BookingSlot
 from app.scopes import BookingScope
 
 from .factories import (
@@ -524,3 +524,49 @@ class TestDeleteBooking:
         with TestClient(anon_app) as c:
             resp = c.delete(f"/bookings/{BOOKING_ID}")
         assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# GET /bookings/slots  (public — no auth required)
+# ---------------------------------------------------------------------------
+
+
+SLOT = BookingSlot(
+    start_datetime="2026-05-01T12:00:00",
+    end_datetime="2026-05-07T10:00:00",
+)
+
+
+class TestGetSlots:
+    def test_returns_slots_unauthenticated(self, anon_app):
+        with patch("app.routers.booking.get_slots_cache", return_value=None), \
+             patch("app.routers.booking.set_slots_cache"), \
+             patch(CRUD_PATH) as mock_crud:
+            mock_crud.list_occupied_slots = AsyncMock(return_value=[SLOT])
+            with TestClient(anon_app) as c:
+                resp = c.get(f"/bookings/slots?property_id={PROPERTY_ID}")
+        assert resp.status_code == 200
+        assert len(resp.json()) == 1
+
+    def test_returns_empty_list_when_no_bookings(self, anon_app):
+        with patch("app.routers.booking.get_slots_cache", return_value=None), \
+             patch("app.routers.booking.set_slots_cache"), \
+             patch(CRUD_PATH) as mock_crud:
+            mock_crud.list_occupied_slots = AsyncMock(return_value=[])
+            with TestClient(anon_app) as c:
+                resp = c.get(f"/bookings/slots?property_id={PROPERTY_ID}")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_serves_from_cache(self, anon_app):
+        cached = [SLOT.model_dump(mode="json")]
+        with patch("app.routers.booking.get_slots_cache", return_value=cached):
+            with TestClient(anon_app) as c:
+                resp = c.get(f"/bookings/slots?property_id={PROPERTY_ID}")
+        assert resp.status_code == 200
+        assert len(resp.json()) == 1
+
+    def test_missing_property_id_returns_422(self, anon_app):
+        with TestClient(anon_app) as c:
+            resp = c.get("/bookings/slots")
+        assert resp.status_code == 422
