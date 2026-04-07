@@ -202,7 +202,9 @@ async def get_property_slots(
 
 
 @router.get("/", response_model=list[BookingEnriched])
+@limiter.limit("200/minute")
 async def list_bookings(
+    request: Request,
     filters: BookingFilters = Depends(),
     current_user: CurrentUser = Depends(can_read_or_manage_booking),
     properties_client: PropertiesClient = Depends(get_properties_client),
@@ -232,7 +234,9 @@ async def list_bookings(
 
 
 @router.post("/", response_model=BookingResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit("30/minute")
 async def create_booking(
+    request: Request,
     payload: BookingCreate,
     current_user: CurrentUser = Depends(can_write_booking),
     properties_client: PropertiesClient = Depends(get_properties_client),
@@ -273,7 +277,9 @@ async def create_booking(
 
 
 @router.get("/{booking_id}", response_model=BookingEnriched)
+@limiter.limit("200/minute")
 async def get_booking(
+    request: Request,
     booking_id: UUID,
     current_user: CurrentUser = Depends(can_read_or_manage_booking),
     properties_client: PropertiesClient = Depends(get_properties_client),
@@ -305,7 +311,9 @@ async def get_booking(
 
 
 @router.patch("/{booking_id}/status", response_model=BookingResponse)
+@limiter.limit("60/minute")
 async def update_booking_status(
+    request: Request,
     booking_id: UUID,
     payload: BookingStatusUpdate,
     current_user: CurrentUser = Depends(get_current_user),
@@ -354,7 +362,8 @@ async def update_booking_status(
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=[Depends(can_admin_delete_booking)],
 )
-async def delete_booking(booking_id: UUID) -> None:
+@limiter.limit("60/minute")
+async def delete_booking(request: Request, booking_id: UUID) -> None:
     deleted = await booking_crud.delete_booking(booking_id)
     if not deleted:
         raise HTTPException(
