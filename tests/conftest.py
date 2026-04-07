@@ -10,13 +10,14 @@ import os
 # Disable slowapi rate limiting in tests — must be set before app.limiter is imported.
 os.environ["SLOWAPI_NO_LIMITS"] = "true"
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
-from app.limiter import limiter
 from app.deps import (
     can_admin_delete_booking,
     can_read_or_manage_booking,
@@ -29,6 +30,9 @@ from app.deps import (
 from app.routers.booking import router
 
 from .factories import make_admin, make_customer, make_property_owner
+
+# In-memory limiter for unit tests — avoids any Redis connection at import time.
+_limiter = Limiter(key_func=get_remote_address)
 
 # ---------------------------------------------------------------------------
 # Default no-op client mocks — prevent real HTTP calls in tests
@@ -70,7 +74,7 @@ def build_app(current_user, properties_client=None, users_client=None, payments_
     """
     app = FastAPI()
     app.include_router(router)
-    app.state.limiter = limiter
+    app.state.limiter = _limiter
 
     async def _user():
         return current_user
@@ -121,7 +125,7 @@ def anon_app():
     """
     app = FastAPI()
     app.include_router(router)
-    app.state.limiter = limiter
+    app.state.limiter = _limiter
     return app
 
 
@@ -144,3 +148,20 @@ def client_factory():
         )
 
     return _make
+
+
+# ---------------------------------------------------------------------------
+# Redis cache mock — keeps unit tests free of any Redis dependency.
+# Tests that specifically assert caching behaviour (e.g. test_serves_from_cache)
+# override these patches with their own `with patch(...)` context managers.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _mock_cache():
+    with (
+        patch("app.routers.booking.get_slots_cache", new=AsyncMock(return_value=None)),
+        patch("app.routers.booking.set_slots_cache", new=AsyncMock()),
+        patch("app.routers.booking.invalidate_slots_cache", new=AsyncMock()),
+    ):
+        yield
