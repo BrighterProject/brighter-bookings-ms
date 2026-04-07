@@ -15,8 +15,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 
 from app.deps import (
     can_admin_delete_booking,
@@ -27,12 +25,10 @@ from app.deps import (
     get_users_client,
     get_properties_client,
 )
+from app.limiter import limiter
 from app.routers.booking import router
 
 from .factories import make_admin, make_customer, make_property_owner
-
-# In-memory limiter for unit tests — avoids any Redis connection at import time.
-_limiter = Limiter(key_func=get_remote_address)
 
 # ---------------------------------------------------------------------------
 # Default no-op client mocks — prevent real HTTP calls in tests
@@ -74,7 +70,7 @@ def build_app(current_user, properties_client=None, users_client=None, payments_
     """
     app = FastAPI()
     app.include_router(router)
-    app.state.limiter = _limiter
+    app.state.limiter = limiter
 
     async def _user():
         return current_user
@@ -125,7 +121,7 @@ def anon_app():
     """
     app = FastAPI()
     app.include_router(router)
-    app.state.limiter = _limiter
+    app.state.limiter = limiter
     return app
 
 
