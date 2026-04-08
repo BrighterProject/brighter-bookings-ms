@@ -12,11 +12,11 @@ from app.models import Booking, BookingStatus
 from app.schemas import BookingFilters, BookingResponse, BookingSlot, BookingStatusUpdate
 
 
-def _to_utc(dt: datetime) -> datetime:
-    """Ensure a datetime is UTC-aware, handling both aware and naive inputs."""
+def _to_naive(dt: datetime) -> datetime:
+    """Normalise a datetime to naive (UTC), stripping any timezone info."""
     if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+        return dt
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 def _overlaps_unavailabilities(
@@ -26,8 +26,8 @@ def _overlaps_unavailabilities(
 ) -> bool:
     """Return True if [start, end) overlaps any unavailability window."""
     for u in unavailabilities:
-        u_start = _to_utc(datetime.fromisoformat(u["start_datetime"]))
-        u_end = _to_utc(datetime.fromisoformat(u["end_datetime"]))
+        u_start = _to_naive(datetime.fromisoformat(u["start_datetime"]))
+        u_end = _to_naive(datetime.fromisoformat(u["end_datetime"]))
         if start < u_end and end > u_start:
             return True
     return False
