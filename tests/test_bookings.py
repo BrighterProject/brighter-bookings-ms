@@ -156,24 +156,22 @@ class TestCreateBooking:
         assert resp.status_code == 422
 
     def test_end_before_start_returns_422(self, client_factory):
-        from .factories import LATER, NOW
+        from .factories import END_DATE, START_DATE
 
         client = client_factory(make_customer(), properties_client=self._mock_vc())
         payload = booking_create_payload(
-            start_datetime=LATER.isoformat(), end_datetime=NOW.isoformat()
+            start_date=END_DATE.isoformat(), end_date=START_DATE.isoformat()
         )
         resp = client.post("/bookings", json=payload)
         assert resp.status_code == 422
 
     def test_duration_too_short_returns_422(self, client_factory):
-        from datetime import timedelta
-
-        from .factories import NOW
+        from .factories import START_DATE
 
         client = client_factory(make_customer(), properties_client=self._mock_vc())
         payload = booking_create_payload(
-            start_datetime=NOW.isoformat(),
-            end_datetime=(NOW + timedelta(minutes=30)).isoformat(),
+            start_date=START_DATE.isoformat(),
+            end_date=START_DATE.isoformat(),  # same day = 0 nights
         )
         resp = client.post("/bookings", json=payload)
         assert resp.status_code == 422
@@ -532,8 +530,8 @@ class TestDeleteBooking:
 
 
 SLOT = BookingSlot(
-    start_datetime="2026-05-01T12:00:00",
-    end_datetime="2026-05-07T10:00:00",
+    start_date="2026-05-01",
+    end_date="2026-05-07",
 )
 
 

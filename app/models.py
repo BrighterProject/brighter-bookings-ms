@@ -19,8 +19,8 @@ class Booking(Model):
     property_owner_id = fields.UUIDField()  # denormalized snapshot from properties-ms
     user_id = fields.UUIDField()  # the customer who made the booking
 
-    start_datetime = fields.DatetimeField()
-    end_datetime = fields.DatetimeField()
+    start_date = fields.DateField()
+    end_date = fields.DateField()
 
     status = fields.CharEnumField(BookingStatus, default=BookingStatus.PENDING)
 

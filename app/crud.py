@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
@@ -12,22 +12,15 @@ from app.models import Booking, BookingStatus
 from app.schemas import BookingFilters, BookingResponse, BookingSlot, BookingStatusUpdate
 
 
-def _to_naive(dt: datetime) -> datetime:
-    """Normalise a datetime to naive (UTC), stripping any timezone info."""
-    if dt.tzinfo is None:
-        return dt
-    return dt.astimezone(timezone.utc).replace(tzinfo=None)
-
-
 def _overlaps_unavailabilities(
-    start: datetime,
-    end: datetime,
+    start: date,
+    end: date,
     unavailabilities: list[dict],
 ) -> bool:
     """Return True if [start, end) overlaps any unavailability window."""
     for u in unavailabilities:
-        u_start = _to_naive(datetime.fromisoformat(u["start_datetime"]))
-        u_end = _to_naive(datetime.fromisoformat(u["end_datetime"]))
+        u_start = date.fromisoformat(u["start_date"])
+        u_end = date.fromisoformat(u["end_date"])
         if start < u_end and end > u_start:
             return True
     return False
@@ -37,16 +30,16 @@ class BookingCRUD(CRUD[Booking, BookingResponse]):  # type: ignore
     async def _has_db_conflict(
         self,
         property_id: UUID,
-        start: datetime,
-        end: datetime,
+        start: date,
+        end: date,
         exclude_id: UUID | None = None,
     ) -> bool:
         """Return True if an active booking overlaps the given window."""
         qs = Booking.filter(
             property_id=property_id,
             status__in=[BookingStatus.PENDING, BookingStatus.CONFIRMED],
-            start_datetime__lt=end,
-            end_datetime__gt=start,
+            start_date__lt=end,
+            end_date__gt=start,
         )
         if exclude_id is not None:
             qs = qs.exclude(id=exclude_id)
@@ -57,8 +50,8 @@ class BookingCRUD(CRUD[Booking, BookingResponse]):  # type: ignore
         property_id: UUID,
         property_owner_id: UUID,
         user_id: UUID,
-        start_datetime: datetime,
-        end_datetime: datetime,
+        start_date: date,
+        end_date: date,
         price_per_night: Decimal,
         currency: str,
         notes: str | None,
@@ -70,13 +63,13 @@ class BookingCRUD(CRUD[Booking, BookingResponse]):  # type: ignore
           - no overlap with property unavailability windows
         """
         # Check unavailabilities outside the transaction (no DB rows involved)
-        if _overlaps_unavailabilities(start_datetime, end_datetime, unavailabilities):
+        if _overlaps_unavailabilities(start_date, end_date, unavailabilities):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Booking overlaps with a property unavailability period",
             )
 
-        num_nights = Decimal((end_datetime.date() - start_datetime.date()).days)
+        num_nights = Decimal((end_date - start_date).days)
         total_price = (price_per_night * num_nights).quantize(Decimal("0.01"))
 
         # Atomic check-then-insert: SELECT FOR UPDATE prevents double-booking
@@ -84,8 +77,8 @@ class BookingCRUD(CRUD[Booking, BookingResponse]):  # type: ignore
             if await Booking.filter(
                 property_id=property_id,
                 status__in=[BookingStatus.PENDING, BookingStatus.CONFIRMED],
-                start_datetime__lt=end_datetime,
-                end_datetime__gt=start_datetime,
+                start_date__lt=end_date,
+                end_date__gt=start_date,
             ).select_for_update().exists():
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
@@ -96,8 +89,8 @@ class BookingCRUD(CRUD[Booking, BookingResponse]):  # type: ignore
                 property_id=property_id,
                 property_owner_id=property_owner_id,
                 user_id=user_id,
-                start_datetime=start_datetime,
-                end_datetime=end_datetime,
+                start_date=start_date,
+                end_date=end_date,
                 price_per_night=price_per_night,
                 total_price=total_price,
                 currency=currency,
@@ -167,7 +160,7 @@ class BookingCRUD(CRUD[Booking, BookingResponse]):  # type: ignore
         bookings = await Booking.filter(
             property_id=property_id,
             status__in=[BookingStatus.PENDING, BookingStatus.CONFIRMED],
-        ).only("start_datetime", "end_datetime")
+        ).only("start_date", "end_date")
         return [BookingSlot.model_validate(b, from_attributes=True) for b in bookings]
 
     async def delete_booking(self, booking_id: UUID) -> bool:

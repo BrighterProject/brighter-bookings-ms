@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
 from uuid import UUID
@@ -18,15 +18,15 @@ class BookingStatus(StrEnum):
 
 class BookingCreate(BaseModel):
     property_id: UUID
-    start_datetime: datetime
-    end_datetime: datetime
+    start_date: date
+    end_date: date
     notes: str | None = Field(default=None, max_length=1000)
 
     @model_validator(mode="after")
-    def validate_time_range(self) -> BookingCreate:
-        if self.end_datetime <= self.start_datetime:
-            raise ValueError("end_datetime must be after start_datetime")
-        nights = (self.end_datetime.date() - self.start_datetime.date()).days
+    def validate_date_range(self) -> BookingCreate:
+        if self.end_date <= self.start_date:
+            raise ValueError("end_date must be after start_date")
+        nights = (self.end_date - self.start_date).days
         if nights < 1:
             raise ValueError("Booking must be at least 1 night")
         return self
@@ -41,8 +41,8 @@ class BookingResponse(BaseModel):
     property_id: UUID
     property_owner_id: UUID
     user_id: UUID
-    start_datetime: datetime
-    end_datetime: datetime
+    start_date: date
+    end_date: date
     status: BookingStatus
     price_per_night: Decimal
     total_price: Decimal
@@ -56,8 +56,8 @@ class BookingResponse(BaseModel):
 class BookingSlot(BaseModel):
     """Minimal occupied slot — reveals no user identity."""
 
-    start_datetime: datetime
-    end_datetime: datetime
+    start_date: date
+    end_date: date
 
     model_config = ConfigDict(from_attributes=True)
 

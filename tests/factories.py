@@ -5,7 +5,7 @@ Import from here in every test file — never define dummy data inline.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime
 from uuid import UUID, uuid4
 
 from app.deps import CurrentUser
@@ -24,8 +24,9 @@ OTHER_USER_ID: UUID = uuid4()
 BOOKING_ID: UUID = uuid4()
 PROPERTY_ID: UUID = uuid4()
 
-NOW = datetime(2026, 6, 1, 14, 0, 0, tzinfo=UTC)  # check-in time
-LATER = NOW + timedelta(days=2)  # 2-night stay
+NOW = datetime(2026, 6, 1, 14, 0, 0, tzinfo=UTC)  # used for updated_at timestamps
+START_DATE = date(2026, 6, 1)
+END_DATE = date(2026, 6, 3)  # 2-night stay
 
 
 # ---------------------------------------------------------------------------
@@ -89,8 +90,8 @@ def booking_response(**overrides) -> dict:
         property_id=str(PROPERTY_ID),
         property_owner_id=str(PROPERTY_OWNER_ID),
         user_id=str(CUSTOMER_ID),
-        start_datetime=NOW.isoformat(),
-        end_datetime=LATER.isoformat(),
+        start_date=START_DATE.isoformat(),
+        end_date=END_DATE.isoformat(),
         status="pending",
         price_per_night="50.00",
         total_price="100.00",
@@ -136,8 +137,8 @@ def user_dict(user_id: UUID = CUSTOMER_ID, **overrides) -> dict:
 def booking_create_payload(**overrides) -> dict:
     base = dict(
         property_id=str(PROPERTY_ID),
-        start_datetime=NOW.isoformat(),
-        end_datetime=LATER.isoformat(),
+        start_date=START_DATE.isoformat(),
+        end_date=END_DATE.isoformat(),
         notes=None,
     )
     return {**base, **overrides}
