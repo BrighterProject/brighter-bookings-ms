@@ -44,9 +44,6 @@ coverage.xml
 .pytest_cache/
 cover/
 
-# Migrations
-migrations/
-
 # Environments
 .env
 .venv
