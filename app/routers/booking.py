@@ -1,8 +1,9 @@
 import asyncio
+from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from loguru import logger
 
 from app.cache import get_slots_cache, invalidate_slots_cache, set_slots_cache
@@ -177,6 +178,28 @@ def _assert_transition(
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+
+@router.get("/occupied-property-ids", response_model=list[UUID])
+@limiter.limit("120/minute")
+async def get_occupied_property_ids(
+    request: Request,
+    from_date: date = Query(...),
+    to_date: date = Query(...),
+) -> list[UUID]:
+    """
+    Internal endpoint: returns distinct property IDs that have PENDING or CONFIRMED
+    bookings overlapping [from_date, to_date). Used by properties-ms availability search.
+    Public — no auth required (property IDs are not sensitive).
+    """
+    from app.models import Booking, BookingStatus as BS
+
+    property_ids = await Booking.filter(
+        status__in=[BS.PENDING, BS.CONFIRMED],
+        start_date__lt=to_date,
+        end_date__gt=from_date,
+    ).values_list("property_id", flat=True)
+    return list(set(property_ids))
 
 
 @router.get("/slots", response_model=list[BookingSlot])
