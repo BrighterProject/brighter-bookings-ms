@@ -96,7 +96,10 @@ def booking_response(**overrides) -> dict:
         price_per_night="50.00",
         total_price="100.00",
         currency="EUR",
-        notes=None,
+        guest_name=None,
+        guest_email=None,
+        guest_phone=None,
+        special_requests=None,
         updated_at=NOW.isoformat(),
     )
     return {**base, **overrides}
@@ -139,6 +142,9 @@ def booking_create_payload(**overrides) -> dict:
         property_id=str(PROPERTY_ID),
         start_date=START_DATE.isoformat(),
         end_date=END_DATE.isoformat(),
-        notes=None,
+        guest_name=None,
+        guest_email=None,
+        guest_phone=None,
+        special_requests=None,
     )
     return {**base, **overrides}

@@ -20,7 +20,10 @@ class BookingCreate(BaseModel):
     property_id: UUID
     start_date: date
     end_date: date
-    notes: str | None = Field(default=None, max_length=1000)
+    guest_name: str | None = Field(default=None, max_length=255)
+    guest_email: str | None = Field(default=None, max_length=255)
+    guest_phone: str | None = Field(default=None, max_length=50)
+    special_requests: str | None = Field(default=None, max_length=1000)
 
     @model_validator(mode="after")
     def validate_date_range(self) -> BookingCreate:
@@ -47,7 +50,10 @@ class BookingResponse(BaseModel):
     price_per_night: Decimal
     total_price: Decimal
     currency: str
-    notes: str | None
+    guest_name: str | None
+    guest_email: str | None
+    guest_phone: str | None
+    special_requests: str | None
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

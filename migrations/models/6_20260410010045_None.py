@@ -5,24 +5,33 @@ RUN_IN_TRANSACTION = True
 
 async def upgrade(db: BaseDBAsyncClient) -> str:
     return """
-        ALTER TABLE "bookings" ADD "start_date" DATE NOT NULL DEFAULT '2000-01-01';
-        ALTER TABLE "bookings" ADD "end_date" DATE NOT NULL DEFAULT '2000-01-01';
-        UPDATE "bookings" SET "start_date" = "start_datetime"::date, "end_date" = "end_datetime"::date;
-        ALTER TABLE "bookings" DROP COLUMN "start_datetime";
-        ALTER TABLE "bookings" DROP COLUMN "end_datetime";
-        ALTER TABLE "bookings" ALTER COLUMN "start_date" DROP DEFAULT;
-        ALTER TABLE "bookings" ALTER COLUMN "end_date" DROP DEFAULT;"""
+        CREATE TABLE IF NOT EXISTS "bookings" (
+    "id" UUID NOT NULL PRIMARY KEY,
+    "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "property_id" UUID NOT NULL,
+    "property_owner_id" UUID NOT NULL,
+    "user_id" UUID NOT NULL,
+    "start_date" DATE NOT NULL,
+    "end_date" DATE NOT NULL,
+    "status" VARCHAR(9) NOT NULL DEFAULT 'pending',
+    "price_per_night" DECIMAL(8,2) NOT NULL,
+    "total_price" DECIMAL(10,2) NOT NULL,
+    "currency" VARCHAR(3) NOT NULL DEFAULT 'EUR',
+    "notes" TEXT,
+    "updated_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON COLUMN "bookings"."status" IS 'PENDING: pending\nCONFIRMED: confirmed\nCOMPLETED: completed\nCANCELLED: cancelled\nNO_SHOW: no_show';
+CREATE TABLE IF NOT EXISTS "aerich" (
+    "id" SERIAL NOT NULL PRIMARY KEY,
+    "version" VARCHAR(255) NOT NULL,
+    "app" VARCHAR(100) NOT NULL,
+    "content" JSONB NOT NULL
+);"""
 
 
 async def downgrade(db: BaseDBAsyncClient) -> str:
     return """
-        ALTER TABLE "bookings" ADD "start_datetime" TIMESTAMPTZ NOT NULL DEFAULT NOW();
-        ALTER TABLE "bookings" ADD "end_datetime" TIMESTAMPTZ NOT NULL DEFAULT NOW();
-        UPDATE "bookings" SET "start_datetime" = "start_date"::timestamptz, "end_datetime" = "end_date"::timestamptz;
-        ALTER TABLE "bookings" DROP COLUMN "start_date";
-        ALTER TABLE "bookings" DROP COLUMN "end_date";
-        ALTER TABLE "bookings" ALTER COLUMN "start_datetime" DROP DEFAULT;
-        ALTER TABLE "bookings" ALTER COLUMN "end_datetime" DROP DEFAULT;"""
+        """
 
 
 MODELS_STATE = (
