@@ -5,7 +5,6 @@ __pycache__/
 .coverage
 htmlcov/
 .ruff_cache/
-migrations/
 .git/
 .gitignore
 .dockerignore
