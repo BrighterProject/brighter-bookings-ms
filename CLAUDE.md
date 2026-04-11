@@ -53,7 +53,7 @@ It also calls payments-ms via `PaymentsClient` in `app/deps.py` (`http://payment
 app/
   settings.py          # DB_URL, USERS_MS_URL, PROPERTIES_MS_URL (env vars)
   models.py            # Tortoise ORM model: Booking + BookingStatus
-  schemas.py           # Pydantic schemas: BookingCreate, BookingStatusUpdate, BookingResponse, BookingFilters, BookingSlot
+  schemas.py           # Pydantic schemas: BookingCreate, BookingStatusUpdate, BookingResponse, BookingEnriched, BookingFilters, BookingSlot
   crud.py              # BookingCRUD — all DB operations (conflict checks, CRUD)
   deps.py              # Auth deps, PropertiesClient, scope checkers
   scopes.py            # BookingScope StrEnum + BOOKING_SCOPE_DESCRIPTIONS
@@ -93,15 +93,13 @@ Terminal states: `COMPLETED`, `CANCELLED`, `NO_SHOW` — no further transitions 
 
 ## Anonymous slots endpoint
 
-`GET /bookings/slots?property_id=<uuid>` — returns `[{start_datetime, end_datetime}]` for all PENDING+CONFIRMED bookings at a property. **No user identity exposed. Public — no auth required.** Rate limited to 60 requests/minute per IP via `slowapi` + Redis (`app/limiter.py`). Used by the frontend booking form to show occupied date ranges without revealing who booked them.
+`GET /bookings/slots?property_id=<uuid>` — returns `[{start_date, end_date}]` for all PENDING+CONFIRMED bookings at a property. **No user identity exposed. Public — no auth required.** Rate limited to 60 requests/minute per IP via `slowapi` + Redis (`app/limiter.py`). Used by the frontend booking form to show occupied date ranges without revealing who booked them.
 
-`BookingSlot` schema: only `start_datetime` + `end_datetime`. Define it **before** `/{booking_id}` routes in the router to avoid FastAPI matching "slots" as a UUID path param.
+`BookingSlot` schema: only `start_date` + `end_date`. Define it **before** `/{booking_id}` routes in the router to avoid FastAPI matching "slots" as a UUID path param.
 
 ## Booking model
 
-Fields: `id`, `property_id`, `property_owner_id`, `user_id`, `start_datetime`, `end_datetime`, `status`, `price_per_night`, `total_price`, `currency`, `notes`, `updated_at`.
-
-`notes` stores JSON-encoded guest information (name, contact details, special requests) submitted at booking time. It is opaque to booking logic — treat it as a blob.
+Fields: `id`, `property_id`, `property_owner_id`, `user_id`, `start_date`, `end_date`, `status`, `price_per_night`, `total_price`, `currency`, `guest_name`, `guest_email`, `guest_phone`, `special_requests`, `updated_at`.
 
 `property_owner_id` is denormalized from properties-ms at booking creation time to avoid cross-service lookups on every status update. Do not expose it as a writable field.
 
@@ -150,3 +148,4 @@ uv run aerich upgrade
 | `PROPERTIES_MS_URL` | `http://localhost:8001`   | Properties microservice base URL       |
 | `PAYMENTS_MS_URL` | `http://localhost:8003` | Payments microservice base URL     |
 | `REDIS_URL`       | `redis://localhost:6379/0` | Redis connection string (cache)  |
+| `SLOWAPI_NO_LIMITS` | unset | Set `true` in tests to disable rate limiting on `/slots` |
