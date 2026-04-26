@@ -316,3 +316,73 @@ _payments_client = PaymentsClient()
 
 def get_payments_client() -> PaymentsClient:
     return _payments_client
+
+
+# ---------------------------------------------------------------------------
+# System identity for internal service-to-service calls (notifications)
+# ---------------------------------------------------------------------------
+
+_SYSTEM_ADMIN: "CurrentUser | None" = None
+
+
+def _get_system_admin() -> "CurrentUser":
+    global _SYSTEM_ADMIN
+    if _SYSTEM_ADMIN is None:
+        _SYSTEM_ADMIN = CurrentUser(
+            id=UUID("00000000-0000-0000-0000-000000000001"),
+            username="bookings-ms",
+            scopes=["admin:scopes", "admin:notifications:write"],
+        )
+    return _SYSTEM_ADMIN
+
+
+# ---------------------------------------------------------------------------
+# NotificationsClient — fire-and-forget email dispatch to notifications-ms
+# ---------------------------------------------------------------------------
+
+
+@lru_cache(maxsize=1)
+def _get_notifications_http_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        base_url=settings.notifications_ms_url,
+        timeout=httpx.Timeout(5.0),
+        follow_redirects=True,
+    )
+
+
+class NotificationsClient:
+    @property
+    def _client(self) -> httpx.AsyncClient:
+        return _get_notifications_http_client()
+
+    def _headers(self) -> dict[str, str]:
+        admin = _get_system_admin()
+        return {
+            "X-User-Id": str(admin.id),
+            "X-Username": quote(admin.username),
+            "X-User-Scopes": " ".join(admin.scopes),
+        }
+
+    async def send(
+        self, *, to: str, notification_type: str, data: dict | None = None
+    ) -> None:
+        try:
+            await self._client.post(
+                "/notifications/dispatch",
+                json={
+                    "notification_type": notification_type,
+                    "to": to,
+                    "data": data or {},
+                    "triggered_by": "bookings-ms",
+                },
+                headers=self._headers(),
+            )
+        except Exception:
+            pass
+
+
+_notifications_client = NotificationsClient()
+
+
+def get_notifications_client() -> NotificationsClient:
+    return _notifications_client

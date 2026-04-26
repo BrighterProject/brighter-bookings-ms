@@ -11,13 +11,16 @@ from app.crud import booking_crud
 from app.limiter import limiter
 from app.deps import (
     CurrentUser,
+    NotificationsClient,
     PaymentsClient,
     UsersClient,
     PropertiesClient,
+    _get_system_admin,
     can_admin_delete_booking,
     can_read_or_manage_booking,
     can_write_booking,
     get_current_user,
+    get_notifications_client,
     get_payments_client,
     get_users_client,
     get_properties_client,
@@ -86,6 +89,74 @@ async def _enrich(
             )
         )
     return result
+
+
+# ---------------------------------------------------------------------------
+# Notification helpers (fire-and-forget via asyncio.create_task)
+# ---------------------------------------------------------------------------
+
+
+async def _notify_booking_created(
+    booking,
+    property_name: str | None,
+    users_client: UsersClient,
+    nc: NotificationsClient,
+) -> None:
+    admin = _get_system_admin()
+    users = await users_client.get_by_ids(
+        {booking.property_owner_id}, admin
+    )
+    owner_email: str | None = users[0].get("email") if users else None
+
+    prop_label = property_name or str(booking.property_id)
+    data = {
+        "property_name": prop_label,
+        "start_date": str(booking.start_date),
+        "end_date": str(booking.end_date),
+    }
+
+    coros = []
+    if booking.guest_email:
+        coros.append(nc.send(
+            to=booking.guest_email,
+            notification_type="booking_created_guest",
+            data=data,
+        ))
+    if owner_email:
+        coros.append(nc.send(
+            to=owner_email,
+            notification_type="booking_created_owner",
+            data=data,
+        ))
+    if coros:
+        await asyncio.gather(*coros, return_exceptions=True)
+
+
+async def _notify_booking_status_changed(
+    booking,
+    new_status: BookingStatus,
+    users_client: UsersClient,
+    nc: NotificationsClient,
+) -> None:
+    guest_email: str | None = getattr(booking, "guest_email", None)
+    if not guest_email:
+        admin = _get_system_admin()
+        users = await users_client.get_by_ids({booking.user_id}, admin)
+        guest_email = users[0].get("email") if users else None
+
+    if not guest_email:
+        return
+
+    if new_status == BookingStatus.CONFIRMED:
+        await nc.send(
+            to=guest_email,
+            notification_type="booking_confirmed",
+        )
+    elif new_status == BookingStatus.CANCELLED:
+        await nc.send(
+            to=guest_email,
+            notification_type="booking_cancelled",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +334,8 @@ async def create_booking(
     payload: BookingCreate,
     current_user: CurrentUser = Depends(can_write_booking),
     properties_client: PropertiesClient = Depends(get_properties_client),
+    users_client: UsersClient = Depends(get_users_client),
+    notifications_client: NotificationsClient = Depends(get_notifications_client),
 ) -> BookingResponse:
     # 1. Validate property exists and is ACTIVE
     property = await properties_client.get_property(payload.property_id, current_user)
@@ -299,6 +372,14 @@ async def create_booking(
         unavailabilities=unavailabilities,
     )
     await invalidate_slots_cache(payload.property_id)
+    asyncio.create_task(
+        _notify_booking_created(
+            booking,
+            property_name=property.get("name"),
+            users_client=users_client,
+            nc=notifications_client,
+        )
+    )
     return booking
 
 
@@ -344,6 +425,8 @@ async def update_booking_status(
     payload: BookingStatusUpdate,
     current_user: CurrentUser = Depends(get_current_user),
     payments_client: PaymentsClient = Depends(get_payments_client),
+    users_client: UsersClient = Depends(get_users_client),
+    notifications_client: NotificationsClient = Depends(get_notifications_client),
 ) -> BookingResponse:
     # Fetch the booking without ownership filter — we validate permissions manually
     booking = await booking_crud.get_booking(booking_id)
@@ -379,6 +462,13 @@ async def update_booking_status(
         is_property_owner = current_user.id == booking.property_owner_id
         if is_admin or is_property_owner:
             await payments_client.refund_booking(booking_id, current_user)
+
+    if payload.status in {BookingStatus.CONFIRMED, BookingStatus.CANCELLED}:
+        asyncio.create_task(
+            _notify_booking_status_changed(
+                booking, payload.status, users_client, notifications_client
+            )
+        )
 
     return updated
 
