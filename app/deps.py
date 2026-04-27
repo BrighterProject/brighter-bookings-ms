@@ -369,7 +369,7 @@ class NotificationsClient:
     ) -> None:
         try:
             logger.debug("Sending notification from bookings-ms | type={} to={} data={}", notification_type, to, data)
-            await self._client.post(
+            resp = await self._client.post(
                 "/notifications/dispatch",
                 json={
                     "notification_type": notification_type,
@@ -379,9 +379,18 @@ class NotificationsClient:
                 },
                 headers=self._headers(),
             )
-            logger.debug("Successfully sent notification from bookings-ms | type={} to={}", notification_type, to)
+            if resp.status_code >= 400:
+                logger.error(
+                    "Notification dispatch rejected | type={} to={} status={} body={}",
+                    notification_type, to, resp.status_code, resp.text[:500],
+                )
+            else:
+                logger.debug("Successfully sent notification from bookings-ms | type={} to={}", notification_type, to)
         except Exception as exc:
-            logger.error("Failed to send notification from bookings-ms | type={} to={} error={}", notification_type, to, exc)
+            logger.opt(exception=True).error(
+                "Failed to send notification from bookings-ms | type={} to={} error={!r}",
+                notification_type, to, exc,
+            )
 
 
 _notifications_client = NotificationsClient()
