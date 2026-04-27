@@ -346,7 +346,7 @@ def _get_system_admin() -> "CurrentUser":
 def _get_notifications_http_client() -> httpx.AsyncClient:
     return httpx.AsyncClient(
         base_url=settings.notifications_ms_url,
-        timeout=httpx.Timeout(5.0),
+        timeout=httpx.Timeout(5.0, read=60.0),
         follow_redirects=True,
     )
 
