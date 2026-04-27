@@ -124,6 +124,8 @@ async def _notify_booking_created(
         "property_name": prop_label,
         "start_date": start_date_formatted,
         "end_date": end_date_formatted,
+        "booking_id": str(booking.id),
+        "property_id": str(booking.property_id),
     }
 
     coros = []
