@@ -150,7 +150,10 @@ async def _notify_booking_status_changed(
     new_status: BookingStatus,
     users_client: UsersClient,
     nc: NotificationsClient,
+    properties_client: PropertiesClient,
 ) -> None:
+    from datetime import datetime as _dt
+
     guest_email: str | None = getattr(booking, "guest_email", None)
     if not guest_email:
         admin = _get_system_admin()
@@ -160,15 +163,48 @@ async def _notify_booking_status_changed(
     if not guest_email:
         return
 
+    # Fetch property for name and check-in/out times
+    admin = _get_system_admin()
+    property_dict = await properties_client.get_property(booking.property_id, admin)
+    property_name = _resolve_property_name(property_dict) if property_dict else None
+    check_in_time = (property_dict or {}).get("check_in_time")
+    check_out_time = (property_dict or {}).get("check_out_time")
+
+    start = booking.start_date
+    end = booking.end_date
+    num_nights = (end - start).days
+
+    base_data: dict = {
+        "booking_id": str(booking.id),
+        "property_id": str(booking.property_id),
+        "property_name": property_name or "Your property",
+        "start_date": start.strftime("%d %B %Y"),
+        "end_date": end.strftime("%d %B %Y"),
+        "num_nights": str(num_nights),
+        "currency": str(booking.currency),
+        "total_price": f"{float(booking.total_price):.2f}",
+    }
+    if check_in_time:
+        base_data["check_in_time"] = str(check_in_time)
+    if check_out_time:
+        base_data["check_out_time"] = str(check_out_time)
+
     if new_status == BookingStatus.CONFIRMED:
         await nc.send(
             to=guest_email,
             notification_type="booking_confirmed",
+            data=base_data,
         )
     elif new_status == BookingStatus.CANCELLED:
+        cancelled_data = {
+            **base_data,
+            "cancelled_date": _dt.now().strftime("%d %B %Y"),
+            "refund_amount": base_data["total_price"],
+        }
         await nc.send(
             to=guest_email,
             notification_type="booking_cancelled",
+            data=cancelled_data,
         )
 
 
@@ -440,6 +476,7 @@ async def update_booking_status(
     payments_client: PaymentsClient = Depends(get_payments_client),
     users_client: UsersClient = Depends(get_users_client),
     notifications_client: NotificationsClient = Depends(get_notifications_client),
+    properties_client: PropertiesClient = Depends(get_properties_client),
 ) -> BookingResponse:
     # Fetch the booking without ownership filter — we validate permissions manually
     booking = await booking_crud.get_booking(booking_id)
@@ -479,7 +516,7 @@ async def update_booking_status(
     if payload.status in {BookingStatus.CONFIRMED, BookingStatus.CANCELLED}:
         asyncio.create_task(
             _notify_booking_status_changed(
-                booking, payload.status, users_client, notifications_client
+                booking, payload.status, users_client, notifications_client, properties_client
             )
         )
 
