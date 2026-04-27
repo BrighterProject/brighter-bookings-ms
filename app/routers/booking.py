@@ -96,6 +96,15 @@ async def _enrich(
 # ---------------------------------------------------------------------------
 
 
+def _resolve_property_name(property_dict: dict) -> str | None:
+    """Extract property name from a PropertyResponse dict (en preferred, then bg, then ru)."""
+    for locale in ("en", "bg", "ru"):
+        for t in property_dict.get("translations", []):
+            if t.get("locale") == locale and t.get("name"):
+                return t["name"]
+    return None
+
+
 async def _notify_booking_created(
     booking,
     property_name: str | None,
@@ -108,11 +117,13 @@ async def _notify_booking_created(
     )
     owner_email: str | None = users[0].get("email") if users else None
 
-    prop_label = property_name or str(booking.property_id)
+    prop_label = property_name or "Your property"
+    start_date_formatted = booking.start_date.strftime("%b %d")
+    end_date_formatted = booking.end_date.strftime("%b %d")
     data = {
         "property_name": prop_label,
-        "start_date": str(booking.start_date),
-        "end_date": str(booking.end_date),
+        "start_date": start_date_formatted,
+        "end_date": end_date_formatted,
     }
 
     coros = []
@@ -375,7 +386,7 @@ async def create_booking(
     asyncio.create_task(
         _notify_booking_created(
             booking,
-            property_name=property.get("name"),
+            property_name=_resolve_property_name(property),
             users_client=users_client,
             nc=notifications_client,
         )
