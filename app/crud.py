@@ -61,11 +61,15 @@ class BookingCRUD(CRUD[Booking, BookingResponse]):  # type: ignore
         guest_country: str | None,
         special_requests: str | None,
         unavailabilities: list[dict],
+        total_price: Decimal | None = None,
     ) -> BookingResponse:
         """
         Persist a new booking after validating:
           - no DB conflict with existing active bookings (atomic, locked)
           - no overlap with property unavailability windows
+
+        If ``total_price`` is provided (e.g. from the dynamic pricing resolver)
+        it is stored directly; otherwise it is computed as price_per_night × nights.
         """
         # Check unavailabilities outside the transaction (no DB rows involved)
         if _overlaps_unavailabilities(start_date, end_date, unavailabilities):
@@ -74,8 +78,9 @@ class BookingCRUD(CRUD[Booking, BookingResponse]):  # type: ignore
                 detail="Booking overlaps with a property unavailability period",
             )
 
-        num_nights = Decimal((end_date - start_date).days)
-        total_price = (price_per_night * num_nights).quantize(Decimal("0.01"))
+        if total_price is None:
+            num_nights = Decimal((end_date - start_date).days)
+            total_price = (price_per_night * num_nights).quantize(Decimal("0.01"))
 
         # Atomic check-then-insert: SELECT FOR UPDATE prevents double-booking
         async with in_transaction():

@@ -25,6 +25,7 @@ from app.deps import (
     get_users_client,
     get_properties_client,
 )
+from app.pricing_client import get_pricing_client
 from app.limiter import limiter
 from app.routers.booking import router
 
@@ -55,12 +56,20 @@ def _noop_payments_client():
     return mock
 
 
+def _noop_pricing_client():
+    from decimal import Decimal
+
+    mock = MagicMock()
+    mock.resolve = AsyncMock(return_value=(Decimal("100.00"), Decimal("50.00")))
+    return mock
+
+
 # ---------------------------------------------------------------------------
 # App builder — used by all client fixtures
 # ---------------------------------------------------------------------------
 
 
-def build_app(current_user, properties_client=None, users_client=None, payments_client=None) -> FastAPI:
+def build_app(current_user, properties_client=None, users_client=None, payments_client=None, pricing_client=None) -> FastAPI:
     """
     Fresh FastAPI app with auth/scope dependencies overridden to return
     `current_user` unconditionally.
@@ -86,9 +95,11 @@ def build_app(current_user, properties_client=None, users_client=None, payments_
     vc = properties_client if properties_client is not None else _noop_properties_client()
     uc = users_client if users_client is not None else _noop_users_client()
     pc = payments_client if payments_client is not None else _noop_payments_client()
+    prc = pricing_client if pricing_client is not None else _noop_pricing_client()
     app.dependency_overrides[get_properties_client] = lambda: vc
     app.dependency_overrides[get_users_client] = lambda: uc
     app.dependency_overrides[get_payments_client] = lambda: pc
+    app.dependency_overrides[get_pricing_client] = lambda: prc
 
     return app
 
@@ -132,6 +143,7 @@ def client_factory():
         properties_client=None,
         users_client=None,
         payments_client=None,
+        pricing_client=None,
     ) -> TestClient:
         return TestClient(
             build_app(
@@ -139,6 +151,7 @@ def client_factory():
                 properties_client=properties_client,
                 users_client=users_client,
                 payments_client=payments_client,
+                pricing_client=pricing_client,
             ),
             raise_server_exceptions=True,
         )

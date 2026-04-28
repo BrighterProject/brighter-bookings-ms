@@ -568,3 +568,79 @@ class TestGetSlots:
         with TestClient(anon_app) as c:
             resp = c.get("/bookings/slots")
         assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Pricing client integration — create_booking uses resolved totals
+# ---------------------------------------------------------------------------
+
+
+class TestCreateBookingPricing:
+    """Verify that create_booking delegates pricing to PricingClient."""
+
+    def _mock_vc(self) -> MagicMock:
+        mock_vc = MagicMock()
+        mock_vc.get_property = AsyncMock(return_value=property_dict())
+        mock_vc.get_unavailabilities = AsyncMock(return_value=[])
+        return mock_vc
+
+    def _pricing_client(self, total: str = "110.00", avg: str = "55.00") -> MagicMock:
+        from decimal import Decimal
+
+        mock = MagicMock()
+        mock.resolve = AsyncMock(return_value=(Decimal(total), Decimal(avg)))
+        return mock
+
+    def test_resolved_total_passed_to_crud(self, client_factory):
+        """Pricing resolve result flows into create_booking as total_price."""
+        from decimal import Decimal
+
+        prc = self._pricing_client(total="110.00", avg="55.00")
+        client = client_factory(
+            make_customer(),
+            properties_client=self._mock_vc(),
+            pricing_client=prc,
+        )
+        with patch(CRUD_PATH) as mock_crud:
+            mock_crud.create_booking = AsyncMock(return_value=booking_response())
+            client.post("/bookings", json=booking_create_payload())
+        _, kwargs = mock_crud.create_booking.call_args
+        assert kwargs["total_price"] == Decimal("110.00")
+        assert kwargs["price_per_night"] == Decimal("55.00")
+
+    def test_pricing_client_called_with_correct_args(self, client_factory):
+        """resolve() is called with the property_id and dates from the payload."""
+        from .factories import PROPERTY_ID, START_DATE, END_DATE
+
+        prc = self._pricing_client()
+        client = client_factory(
+            make_customer(),
+            properties_client=self._mock_vc(),
+            pricing_client=prc,
+        )
+        with patch(CRUD_PATH) as mock_crud:
+            mock_crud.create_booking = AsyncMock(return_value=booking_response())
+            client.post("/bookings", json=booking_create_payload())
+        prc.resolve.assert_awaited_once()
+        _, kwargs = prc.resolve.call_args
+        assert kwargs["property_id"] == PROPERTY_ID
+        assert kwargs["start_date"] == START_DATE
+        assert kwargs["end_date"] == END_DATE
+
+    def test_fallback_flat_rate_on_pricing_failure(self, client_factory):
+        """When resolve() returns flat rate (base × nights), booking still succeeds."""
+        from decimal import Decimal
+
+        # Flat: 50.00/night × 2 nights = 100.00
+        prc = self._pricing_client(total="100.00", avg="50.00")
+        client = client_factory(
+            make_customer(),
+            properties_client=self._mock_vc(),
+            pricing_client=prc,
+        )
+        with patch(CRUD_PATH) as mock_crud:
+            mock_crud.create_booking = AsyncMock(return_value=booking_response())
+            resp = client.post("/bookings", json=booking_create_payload())
+        assert resp.status_code == 201
+        _, kwargs = mock_crud.create_booking.call_args
+        assert kwargs["total_price"] == Decimal("100.00")

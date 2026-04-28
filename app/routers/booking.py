@@ -25,6 +25,7 @@ from app.deps import (
     get_users_client,
     get_properties_client,
 )
+from app.pricing_client import PricingClient, get_pricing_client
 from app.schemas import (
     BookingCreate,
     BookingEnriched,
@@ -385,6 +386,7 @@ async def create_booking(
     properties_client: PropertiesClient = Depends(get_properties_client),
     users_client: UsersClient = Depends(get_users_client),
     notifications_client: NotificationsClient = Depends(get_notifications_client),
+    pricing_client: PricingClient = Depends(get_pricing_client),
 ) -> BookingResponse:
     # 1. Validate property exists and is ACTIVE
     property = await properties_client.get_property(payload.property_id, current_user)
@@ -406,13 +408,23 @@ async def create_booking(
         payload.property_id, current_user
     )
 
+    # 3. Resolve dynamic pricing; falls back to flat rate if properties-ms is unavailable
+    base_price = Decimal(str(property["price_per_night"]))
+    resolved_total, avg_price_per_night = await pricing_client.resolve(
+        property_id=payload.property_id,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+        base_price=base_price,
+    )
+
     booking = await booking_crud.create_booking(
         property_id=payload.property_id,
         property_owner_id=UUID(property["owner_id"]),
         user_id=current_user.id,
         start_date=payload.start_date,
         end_date=payload.end_date,
-        price_per_night=Decimal(str(property["price_per_night"])),
+        price_per_night=avg_price_per_night,
+        total_price=resolved_total,
         currency=property.get("currency", "EUR"),
         num_guests=payload.num_guests,
         guest_name=payload.guest_name,
