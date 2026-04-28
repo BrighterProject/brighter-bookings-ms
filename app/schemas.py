@@ -20,6 +20,7 @@ class BookingCreate(BaseModel):
     property_id: UUID
     start_date: date
     end_date: date
+    num_guests: int = Field(default=1, ge=1)
     guest_name: str | None = Field(default=None, max_length=255)
     guest_email: str | None = Field(default=None, max_length=255)
     guest_phone: str | None = Field(default=None, max_length=50)
@@ -50,6 +51,7 @@ class BookingResponse(BaseModel):
     price_per_night: Decimal
     total_price: Decimal
     currency: str
+    num_guests: int
     guest_name: str | None
     guest_email: str | None
     guest_phone: str | None

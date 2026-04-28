@@ -30,6 +30,8 @@ class Booking(Model):
     total_price = fields.DecimalField(max_digits=10, decimal_places=2)  # computed
     currency = fields.CharField(max_length=3, default="EUR")
 
+    num_guests = fields.IntField(default=1)
+
     guest_name = fields.CharField(max_length=255, null=True)
     guest_email = fields.CharField(max_length=255, null=True)
     guest_phone = fields.CharField(max_length=50, null=True)
