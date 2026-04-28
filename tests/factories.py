@@ -96,9 +96,11 @@ def booking_response(**overrides) -> dict:
         price_per_night="50.00",
         total_price="100.00",
         currency="EUR",
+        num_guests=1,
         guest_name=None,
         guest_email=None,
         guest_phone=None,
+        guest_country=None,
         special_requests=None,
         updated_at=NOW.isoformat(),
     )

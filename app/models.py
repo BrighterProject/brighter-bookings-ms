@@ -35,6 +35,7 @@ class Booking(Model):
     guest_name = fields.CharField(max_length=255, null=True)
     guest_email = fields.CharField(max_length=255, null=True)
     guest_phone = fields.CharField(max_length=50, null=True)
+    guest_country = fields.CharField(max_length=2, null=True)  # ISO 3166-1 alpha-2
     special_requests = fields.TextField(null=True)
     updated_at = fields.DatetimeField(auto_now=True)
 

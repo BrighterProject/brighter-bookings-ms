@@ -24,6 +24,7 @@ class BookingCreate(BaseModel):
     guest_name: str | None = Field(default=None, max_length=255)
     guest_email: str | None = Field(default=None, max_length=255)
     guest_phone: str | None = Field(default=None, max_length=50)
+    guest_country: str | None = Field(default=None, max_length=2)
     special_requests: str | None = Field(default=None, max_length=1000)
 
     @model_validator(mode="after")
@@ -55,6 +56,7 @@ class BookingResponse(BaseModel):
     guest_name: str | None
     guest_email: str | None
     guest_phone: str | None
+    guest_country: str | None
     special_requests: str | None
     updated_at: datetime
 

@@ -414,9 +414,11 @@ async def create_booking(
         end_date=payload.end_date,
         price_per_night=Decimal(str(property["price_per_night"])),
         currency=property.get("currency", "EUR"),
+        num_guests=payload.num_guests,
         guest_name=payload.guest_name,
         guest_email=payload.guest_email,
         guest_phone=payload.guest_phone,
+        guest_country=payload.guest_country,
         special_requests=payload.special_requests,
         unavailabilities=unavailabilities,
     )

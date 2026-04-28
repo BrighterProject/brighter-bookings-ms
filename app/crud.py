@@ -54,9 +54,11 @@ class BookingCRUD(CRUD[Booking, BookingResponse]):  # type: ignore
         end_date: date,
         price_per_night: Decimal,
         currency: str,
+        num_guests: int,
         guest_name: str | None,
         guest_email: str | None,
         guest_phone: str | None,
+        guest_country: str | None,
         special_requests: str | None,
         unavailabilities: list[dict],
     ) -> BookingResponse:
@@ -97,9 +99,11 @@ class BookingCRUD(CRUD[Booking, BookingResponse]):  # type: ignore
                 price_per_night=price_per_night,
                 total_price=total_price,
                 currency=currency,
+                num_guests=num_guests,
                 guest_name=guest_name,
                 guest_email=guest_email,
                 guest_phone=guest_phone,
+                guest_country=guest_country,
                 special_requests=special_requests,
             )
 
