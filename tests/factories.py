@@ -119,7 +119,7 @@ def property_dict(**overrides) -> dict:
         currency="EUR",
         min_nights=1,
         enable_gap_filler=False,
-        gap_premium_pct="0.00",
+        gap_tax_pct="0.00",
         gap_last_minute_window=7,
         gap_adjacent_only=True,
     )

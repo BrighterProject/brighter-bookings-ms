@@ -455,14 +455,14 @@ async def create_booking(
         base_price=base_price,
     )
 
-    # 3b. Apply gap premium if applicable
-    gap_premium_pct = Decimal(str(property.get("gap_premium_pct", 0)))
+    # 3b. Apply gap tax if applicable
+    gap_tax_pct = Decimal(str(property.get("gap_tax_pct", 0)))
     applied_gap_pct = Decimal("0")
-    if num_nights < min_nights and enable_gap_filler and gap_premium_pct > 0:
-        gap_multiplier = 1 + (gap_premium_pct / 100)
+    if num_nights < min_nights and enable_gap_filler and gap_tax_pct != 0:
+        gap_multiplier = 1 + (gap_tax_pct / 100)
         resolved_total = (resolved_total * gap_multiplier).quantize(Decimal("0.01"))
         avg_price_per_night = (avg_price_per_night * gap_multiplier).quantize(Decimal("0.01"))
-        applied_gap_pct = gap_premium_pct
+        applied_gap_pct = gap_tax_pct
 
     booking = await booking_crud.create_booking(
         property_id=payload.property_id,

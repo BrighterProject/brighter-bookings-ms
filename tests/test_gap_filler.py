@@ -115,7 +115,7 @@ class TestGapFillerValidation:
         prop = property_dict(
             min_nights=3,
             enable_gap_filler=True,
-            gap_premium_pct="20.00",
+            gap_tax_pct="20.00",
             gap_last_minute_window=7,
             gap_adjacent_only=True,
         )
@@ -164,7 +164,7 @@ class TestGapFillerValidation:
         prop = property_dict(
             min_nights=3,
             enable_gap_filler=True,
-            gap_premium_pct="0.00",
+            gap_tax_pct="0.00",
             gap_last_minute_window=30,
             gap_adjacent_only=False,
         )
@@ -196,7 +196,7 @@ class TestGapFillerValidation:
         prop = property_dict(
             min_nights=3,
             enable_gap_filler=True,
-            gap_premium_pct="0.00",
+            gap_tax_pct="0.00",
             gap_last_minute_window=7,
             gap_adjacent_only=True,
         )
