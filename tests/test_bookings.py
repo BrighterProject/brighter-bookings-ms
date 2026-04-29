@@ -644,3 +644,50 @@ class TestCreateBookingPricing:
         assert resp.status_code == 201
         _, kwargs = mock_crud.create_booking.call_args
         assert kwargs["total_price"] == Decimal("100.00")
+
+
+# ---------------------------------------------------------------------------
+# Owner isolation — owners must never see another owner's bookings
+# ---------------------------------------------------------------------------
+
+
+class TestOwnerBookingIsolation:
+    """Security invariant: property_owner_id filter is always applied for owners."""
+
+    def test_owner_cannot_list_other_owners_bookings(self, owner_client, client_factory):
+        """Owner A must not see Owner B's bookings — CRUD must be called with
+        property_owner_id=Owner_A_id, never without the owner constraint."""
+        import uuid
+
+        owner_b_id = uuid.uuid4()
+        owner_b_booking = booking_response(property_owner_id=str(owner_b_id))
+
+        with patch(CRUD_PATH) as mock_crud:
+            mock_crud.list_bookings = AsyncMock(return_value=[owner_b_booking])
+            resp = owner_client.get("/bookings")
+
+        assert resp.status_code == 200
+        mock_crud.list_bookings.assert_called_once()
+        _, kwargs = mock_crud.list_bookings.call_args
+        # Must filter by the current owner's ID (PROPERTY_OWNER_ID from factories)
+        assert kwargs.get("property_owner_id") == PROPERTY_OWNER_ID
+        # Must NOT apply user_id filter (that is the customer path)
+        assert kwargs.get("user_id") is None
+
+    def test_owner_cannot_get_other_owners_booking(self, owner_client):
+        """GET /bookings/{id} for a booking owned by another owner returns 404.
+
+        The CRUD layer returns None when property_owner_id doesn't match, so the
+        router must pass property_owner_id=current_owner_id to get_booking.
+        """
+        with patch(CRUD_PATH) as mock_crud:
+            # Simulate DB returning nothing because filter (property_owner_id) didn't match
+            mock_crud.get_booking = AsyncMock(return_value=None)
+            resp = owner_client.get(f"/bookings/{BOOKING_ID}")
+
+        assert resp.status_code == 404
+        mock_crud.get_booking.assert_called_once()
+        _, kwargs = mock_crud.get_booking.call_args
+        # Verify the owner isolation filter was applied
+        assert kwargs.get("property_owner_id") == PROPERTY_OWNER_ID
+        assert kwargs.get("user_id") is None
