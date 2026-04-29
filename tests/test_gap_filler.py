@@ -153,6 +153,38 @@ class TestGapFillerValidation:
         _, kwargs = mock_crud.create_booking.call_args
         assert kwargs["gap_adjustment_pct"] == Decimal("20.00")
 
+    def test_short_booking_gap_adjacent_only_false_within_window_succeeds(
+        self, client_factory
+    ):
+        """Gap filler enabled, gap_adjacent_only=False, within window → 201 without adjacency check."""
+        today = date.today()
+        start = today + timedelta(days=1)
+        end = start + timedelta(days=2)  # 2-night stay, min_nights=3
+
+        prop = property_dict(
+            min_nights=3,
+            enable_gap_filler=True,
+            gap_premium_pct="0.00",
+            gap_last_minute_window=30,
+            gap_adjacent_only=False,
+        )
+
+        client = client_factory(
+            make_customer(),
+            properties_client=_mock_vc(prop),
+            pricing_client=_mock_pricing("100.00", "50.00"),
+        )
+        with patch(CRUD_PATH) as mock_crud:
+            mock_crud.create_booking = AsyncMock(return_value=booking_response(
+                start_date=start.isoformat(),
+                end_date=end.isoformat(),
+            ))
+            resp = client.post("/bookings", json=booking_create_payload(
+                start_date=start.isoformat(),
+                end_date=end.isoformat(),
+            ))
+        assert resp.status_code == 201
+
     def test_short_booking_gap_filler_adjacent_only_no_adjacent_bookings_returns_400(
         self, client_factory
     ):
