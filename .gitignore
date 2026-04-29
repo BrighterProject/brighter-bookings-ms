@@ -60,3 +60,4 @@ dmypy.json
 
 # Ruff
 .ruff_cache/
+.worktrees
