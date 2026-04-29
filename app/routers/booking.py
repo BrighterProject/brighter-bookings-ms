@@ -403,6 +403,44 @@ async def create_booking(
             ),
         )
 
+    # 1b. Min-nights + gap filler validation
+    num_nights = (payload.end_date - payload.start_date).days
+    min_nights = property.get("min_nights", 1)
+    enable_gap_filler = property.get("enable_gap_filler", False)
+
+    if num_nights < min_nights:
+        if not enable_gap_filler:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Stay does not meet the minimum night requirement for these dates.",
+            )
+        # Gap filler is enabled — verify it's a real gap
+        gap_last_minute_window = property.get("gap_last_minute_window", 7)
+        gap_adjacent_only = property.get("gap_adjacent_only", True)
+        today = date.today()
+
+        # Check last-minute window
+        if (payload.start_date - today).days > gap_last_minute_window:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Stay does not meet the minimum night requirement for these dates.",
+            )
+
+        # If adjacent_only: verify there are bookings immediately before and after
+        if gap_adjacent_only:
+            occupied_slots = await booking_crud.list_occupied_slots(payload.property_id)
+            has_before = any(
+                slot.end_date == payload.start_date for slot in occupied_slots
+            )
+            has_after = any(
+                slot.start_date == payload.end_date for slot in occupied_slots
+            )
+            if not (has_before and has_after):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Stay does not meet the minimum night requirement for these dates.",
+                )
+
     # 2. Fetch unavailabilities and check for conflicts in CRUD
     unavailabilities = await properties_client.get_unavailabilities(
         payload.property_id, current_user
@@ -416,6 +454,15 @@ async def create_booking(
         end_date=payload.end_date,
         base_price=base_price,
     )
+
+    # 3b. Apply gap premium if applicable
+    gap_premium_pct = Decimal(str(property.get("gap_premium_pct", 0)))
+    applied_gap_pct = Decimal("0")
+    if num_nights < min_nights and enable_gap_filler and gap_premium_pct > 0:
+        gap_multiplier = 1 + (gap_premium_pct / 100)
+        resolved_total = (resolved_total * gap_multiplier).quantize(Decimal("0.01"))
+        avg_price_per_night = (avg_price_per_night * gap_multiplier).quantize(Decimal("0.01"))
+        applied_gap_pct = gap_premium_pct
 
     booking = await booking_crud.create_booking(
         property_id=payload.property_id,
@@ -433,6 +480,7 @@ async def create_booking(
         guest_country=payload.guest_country,
         special_requests=payload.special_requests,
         unavailabilities=unavailabilities,
+        gap_adjustment_pct=applied_gap_pct,
     )
     await invalidate_slots_cache(payload.property_id)
     asyncio.create_task(

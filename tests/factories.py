@@ -102,6 +102,7 @@ def booking_response(**overrides) -> dict:
         guest_phone=None,
         guest_country=None,
         special_requests=None,
+        gap_adjustment_pct="0.00",
         updated_at=NOW.isoformat(),
     )
     return {**base, **overrides}
@@ -116,6 +117,11 @@ def property_dict(**overrides) -> dict:
         status="active",
         price_per_night="50.00",
         currency="EUR",
+        min_nights=1,
+        enable_gap_filler=False,
+        gap_premium_pct="0.00",
+        gap_last_minute_window=7,
+        gap_adjacent_only=True,
     )
     return {**base, **overrides}
 

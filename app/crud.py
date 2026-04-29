@@ -62,6 +62,7 @@ class BookingCRUD(CRUD[Booking, BookingResponse]):  # type: ignore
         special_requests: str | None,
         unavailabilities: list[dict],
         total_price: Decimal | None = None,
+        gap_adjustment_pct: Decimal = Decimal("0"),
     ) -> BookingResponse:
         """
         Persist a new booking after validating:
@@ -110,6 +111,7 @@ class BookingCRUD(CRUD[Booking, BookingResponse]):  # type: ignore
                 guest_phone=guest_phone,
                 guest_country=guest_country,
                 special_requests=special_requests,
+                gap_adjustment_pct=gap_adjustment_pct,
             )
 
         return BookingResponse.model_validate(inst, from_attributes=True)

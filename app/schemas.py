@@ -58,6 +58,7 @@ class BookingResponse(BaseModel):
     guest_phone: str | None
     guest_country: str | None
     special_requests: str | None
+    gap_adjustment_pct: Decimal = Decimal("0")
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
