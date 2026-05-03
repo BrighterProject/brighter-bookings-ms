@@ -132,11 +132,11 @@ assert resp.status_code == 200
 
 - Tests: SQLite in-memory (default, mocked via CRUD patch)
 - Production: PostgreSQL (`DB_URL` env var)
-- Migrations: Aerich
+- Migrations: native tortoise CLI — config in `pyproject.toml` (`[tool.tortoise]`), stored in `./migrations/models/`
 
 ```bash
-uv run aerich migrate --name <description>
-uv run aerich upgrade
+uv run tortoise -c main.TORTOISE_ORM makemigrations
+uv run tortoise -c main.TORTOISE_ORM migrate
 ```
 
 ## Environment variables

@@ -11,6 +11,17 @@ from app.limiter import limiter
 from app.logging import setup_logging
 from app.settings import db_url
 
+TORTOISE_ORM = {
+    "connections": {"default": db_url},
+    "apps": {
+        "models": {
+            "models": ["app.models"],
+            "default_connection": "default",
+            "migrations": "migrations.models",
+        },
+    },
+}
+
 setup_logging()
 
 application = FastAPI(title="brighter-bookings-ms", redirect_slashes=False)
@@ -25,6 +36,4 @@ application.add_middleware(
     allow_headers=["*"],
 )
 
-tortoise_conf = setup_app(
-    application, db_url, Path("app") / "routers", ["app.models", "aerich.models"]
-)
+setup_app(application, db_url, Path("app") / "routers", ["app.models"])
