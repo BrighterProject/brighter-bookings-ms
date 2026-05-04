@@ -481,6 +481,7 @@ async def create_booking(
         special_requests=payload.special_requests,
         unavailabilities=unavailabilities,
         gap_adjustment_pct=applied_gap_pct,
+        payment_method=payload.payment_method,
     )
     await invalidate_slots_cache(payload.property_id)
     asyncio.create_task(

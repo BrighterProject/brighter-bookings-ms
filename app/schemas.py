@@ -26,6 +26,7 @@ class BookingCreate(BaseModel):
     guest_phone: str | None = Field(default=None, max_length=50)
     guest_country: str | None = Field(default=None, max_length=2)
     special_requests: str | None = Field(default=None, max_length=1000)
+    payment_method: str | None = None  # card | bank_transfer | cash
 
     @model_validator(mode="after")
     def validate_date_range(self) -> BookingCreate:
@@ -59,6 +60,7 @@ class BookingResponse(BaseModel):
     guest_country: str | None
     special_requests: str | None
     gap_adjustment_pct: Decimal = Decimal("0")
+    payment_method: str | None = None
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

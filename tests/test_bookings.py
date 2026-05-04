@@ -647,6 +647,41 @@ class TestCreateBookingPricing:
 
 
 # ---------------------------------------------------------------------------
+# Payment method field
+# ---------------------------------------------------------------------------
+
+
+class TestPaymentMethodField:
+    def _mock_vc(self) -> MagicMock:
+        mock_vc = MagicMock()
+        mock_vc.get_property = AsyncMock(return_value=property_dict())
+        mock_vc.get_unavailabilities = AsyncMock(return_value=[])
+        return mock_vc
+
+    def test_booking_created_with_payment_method(self, client_factory):
+        client = client_factory(make_customer(), properties_client=self._mock_vc())
+        payload = booking_create_payload()
+        payload["payment_method"] = "bank_transfer"
+        with patch(CRUD_PATH) as mock_crud:
+            mock_crud.create_booking = AsyncMock(
+                return_value=booking_response(payment_method="bank_transfer")
+            )
+            resp = client.post("/bookings", json=payload)
+        assert resp.status_code == 201
+        assert resp.json()["payment_method"] == "bank_transfer"
+
+    def test_booking_created_without_payment_method_defaults_none(self, client_factory):
+        client = client_factory(make_customer(), properties_client=self._mock_vc())
+        with patch(CRUD_PATH) as mock_crud:
+            mock_crud.create_booking = AsyncMock(
+                return_value=booking_response(payment_method=None)
+            )
+            resp = client.post("/bookings", json=booking_create_payload())
+        assert resp.status_code == 201
+        assert resp.json()["payment_method"] is None
+
+
+# ---------------------------------------------------------------------------
 # Owner isolation — owners must never see another owner's bookings
 # ---------------------------------------------------------------------------
 
