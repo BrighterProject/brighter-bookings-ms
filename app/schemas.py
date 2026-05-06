@@ -27,6 +27,7 @@ class BookingCreate(BaseModel):
     guest_country: str | None = Field(default=None, max_length=2)
     special_requests: str | None = Field(default=None, max_length=1000)
     payment_method: str | None = None  # card | bank_transfer | cash
+    locale: str | None = None
 
     @model_validator(mode="after")
     def validate_date_range(self) -> BookingCreate:

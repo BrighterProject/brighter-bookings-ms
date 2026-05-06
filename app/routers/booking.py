@@ -111,12 +111,15 @@ async def _notify_booking_created(
     property_name: str | None,
     users_client: UsersClient,
     nc: NotificationsClient,
+    guest_locale: str = "en",
 ) -> None:
     admin = _get_system_admin()
     users = await users_client.get_by_ids(
         {booking.property_owner_id}, admin
     )
-    owner_email: str | None = users[0].get("email") if users else None
+    owner: dict = users[0] if users else {}
+    owner_email: str | None = owner.get("email")
+    owner_locale: str = owner.get("locale", "en")
 
     prop_label = property_name or "Your property"
     start_date_formatted = booking.start_date.strftime("%b %d")
@@ -135,12 +138,14 @@ async def _notify_booking_created(
             to=booking.guest_email,
             notification_type="booking_created_guest",
             data=data,
+            locale=guest_locale,
         ))
     if owner_email:
         coros.append(nc.send(
             to=owner_email,
             notification_type="booking_created_owner",
             data=data,
+            locale=owner_locale,
         ))
     if coros:
         await asyncio.gather(*coros, return_exceptions=True)
@@ -155,11 +160,11 @@ async def _notify_booking_status_changed(
 ) -> None:
     from datetime import datetime as _dt
 
-    guest_email: str | None = getattr(booking, "guest_email", None)
-    if not guest_email:
-        admin = _get_system_admin()
-        users = await users_client.get_by_ids({booking.user_id}, admin)
-        guest_email = users[0].get("email") if users else None
+    admin = _get_system_admin()
+    users = await users_client.get_by_ids({booking.user_id}, admin)
+    guest_user: dict = users[0] if users else {}
+    guest_email: str | None = getattr(booking, "guest_email", None) or guest_user.get("email")
+    guest_locale: str = guest_user.get("locale", "en")
 
     if not guest_email:
         return
@@ -195,6 +200,7 @@ async def _notify_booking_status_changed(
             to=guest_email,
             notification_type="booking_confirmed",
             data=base_data,
+            locale=guest_locale,
         )
     elif new_status == BookingStatus.CANCELLED:
         cancelled_data = {
@@ -206,6 +212,7 @@ async def _notify_booking_status_changed(
             to=guest_email,
             notification_type="booking_cancelled",
             data=cancelled_data,
+            locale=guest_locale,
         )
 
 
@@ -490,6 +497,7 @@ async def create_booking(
             property_name=_resolve_property_name(property),
             users_client=users_client,
             nc=notifications_client,
+            guest_locale=payload.locale or "en",
         )
     )
     return booking
