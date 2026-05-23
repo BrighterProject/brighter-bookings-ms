@@ -906,6 +906,27 @@ class TestGuestCancelRefundPolicy:
         assert resp.status_code == 200
         mock_pc.refund_booking.assert_not_awaited()
 
+    def test_moderate_policy_boundary_at_exactly_5_days(self, client_factory):
+        """Exactly 5 days away -> no refund (threshold is strictly > 5)."""
+        client, mock_vc, mock_pc, check_in = self._make_client_and_mocks(
+            client_factory, cancellation_policy="moderate", days_until_checkin=5
+        )
+        with patch(CRUD_PATH) as mock_crud:
+            mock_crud.get_booking = AsyncMock(return_value=booking_model(
+                status="confirmed",
+                user_id=str(CUSTOMER_ID),
+                start_date=check_in.isoformat(),
+            ))
+            mock_crud.update_booking_status = AsyncMock(return_value=booking_model(
+                status="cancelled",
+                user_id=str(CUSTOMER_ID),
+                start_date=check_in.isoformat(),
+            ))
+            resp = client.patch(f"/bookings/{BOOKING_ID}/status", json={"status": "cancelled"})
+
+        assert resp.status_code == 200
+        mock_pc.refund_booking.assert_not_awaited()
+
     def test_pending_booking_cancelled_by_guest_never_refunds(self, client_factory):
         """PENDING -> CANCELLED by guest: no payment, so no refund regardless of policy."""
         client, mock_vc, mock_pc, check_in = self._make_client_and_mocks(
