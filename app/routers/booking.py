@@ -545,6 +545,44 @@ async def get_booking(
     return results[0]
 
 
+_MODERATE_REFUND_THRESHOLD_DAYS = 5
+
+
+async def _apply_guest_cancel_refund(
+    booking_id: UUID,
+    property_id: UUID,
+    check_in: date,
+    properties_client: PropertiesClient,
+    payments_client: PaymentsClient,
+) -> None:
+    """
+    Apply the property's cancellation_policy when a guest cancels a confirmed booking.
+
+    - free    → always refund
+    - moderate → refund only if check-in is more than 5 days away
+    - strict  → no refund
+
+    Failures are swallowed so they never affect the cancel response.
+    """
+    try:
+        property_data = await properties_client.get_property(
+            property_id, _get_system_admin()
+        )
+        if not property_data:
+            return
+        policy = property_data.get("cancellation_policy", "strict")
+
+        if policy == "free":
+            await payments_client.refund_booking(booking_id, _get_system_admin())
+        elif policy == "moderate":
+            days_until = (check_in - date.today()).days
+            if days_until > _MODERATE_REFUND_THRESHOLD_DAYS:
+                await payments_client.refund_booking(booking_id, _get_system_admin())
+        # strict: no refund
+    except Exception:
+        logger.exception("Guest cancel refund check failed for booking {}", booking_id)
+
+
 @router.patch("/{booking_id}/status", response_model=BookingResponse)
 @limiter.limit("60/minute")
 async def update_booking_status(
@@ -580,8 +618,10 @@ async def update_booking_status(
 
     await invalidate_slots_cache(booking.property_id)
 
-    # Trigger Stripe refund when the property owner (or admin) cancels a paid booking.
-    # Customer cancellations do NOT refund — per the no-refund policy for customers.
+    # Trigger Stripe refund on cancellation.
+    # - Owner/admin cancellations always refund.
+    # - Guest cancellations of CONFIRMED bookings apply the property's cancellation_policy.
+    # - Guest cancellations of PENDING bookings never refund (no payment taken yet).
     # Failure to refund does not block the cancellation response.
     if payload.status == BookingStatus.CANCELLED:
         is_admin = (
@@ -589,8 +629,23 @@ async def update_booking_status(
             or BookingScope.ADMIN_WRITE in current_user.scopes
         )
         is_property_owner = current_user.id == booking.property_owner_id
+        is_guest = (
+            current_user.id == booking.user_id
+            and not is_admin
+            and not is_property_owner
+        )
+
         if is_admin or is_property_owner:
             await payments_client.refund_booking(booking_id, current_user)
+        elif is_guest and booking.status == BookingStatus.CONFIRMED:
+            await _apply_guest_cancel_refund(
+                booking_id,
+                booking.property_id,
+                booking.start_date,
+                properties_client,
+                payments_client,
+            )
+        # PENDING → CANCELLED by guest: no payment, no refund.
 
     if payload.status in {BookingStatus.CONFIRMED, BookingStatus.CANCELLED}:
         asyncio.create_task(
