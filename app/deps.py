@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass, field
 from functools import lru_cache
 from urllib.parse import quote, unquote
@@ -300,16 +301,53 @@ class PaymentsClient:
     async def refund_booking(self, booking_id: UUID, caller: CurrentUser) -> bool:
         """
         Request a refund for a booking's payment.
-        Returns True on success, False on any error (silently degraded).
+        Retries up to 3 times on network errors or 5xx responses (exponential backoff).
+        Logs a warning on each retry and an error if all attempts fail.
+        Returns True on success, False after exhausting retries (never raises).
         """
-        try:
-            resp = await self._client.post(
-                f"/payments/booking/{booking_id}/refund",
-                headers=self._headers(caller),
-            )
-            return resp.status_code < 400
-        except (httpx.RequestError, Exception):
-            return False
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                resp = await self._client.post(
+                    f"/payments/booking/{booking_id}/refund",
+                    headers=self._headers(caller),
+                )
+                if resp.status_code < 400:
+                    return True
+                # 4xx — no point retrying (not found, forbidden, bad state)
+                if resp.status_code < 500:
+                    logger.error(
+                        "Refund rejected by payments-ms for booking {} | status={} body={}",
+                        booking_id,
+                        resp.status_code,
+                        resp.text[:200],
+                    )
+                    return False
+                # 5xx — retryable
+                logger.warning(
+                    "Refund attempt {}/{} failed for booking {} | status={}",
+                    attempt,
+                    max_attempts,
+                    booking_id,
+                    resp.status_code,
+                )
+            except httpx.RequestError as exc:
+                logger.warning(
+                    "Refund attempt {}/{} failed for booking {} | network error: {}",
+                    attempt,
+                    max_attempts,
+                    booking_id,
+                    exc,
+                )
+            if attempt < max_attempts:
+                await asyncio.sleep(2 ** (attempt - 1))  # 1s, 2s
+
+        logger.error(
+            "Refund FAILED after {} attempts for booking {} — manual refund required",
+            max_attempts,
+            booking_id,
+        )
+        return False
 
 
 _payments_client = PaymentsClient()
