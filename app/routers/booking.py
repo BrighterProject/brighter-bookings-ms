@@ -214,7 +214,6 @@ async def _notify_booking_status_changed(
         cancelled_data = {
             **base_data,
             "cancelled_date": _dt.now().strftime("%d %B %Y"),
-            "refund_amount": base_data["total_price"],
         }
         await nc.send(
             to=guest_email,
