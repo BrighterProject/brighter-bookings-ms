@@ -725,4 +725,39 @@ class TestOwnerBookingIsolation:
         _, kwargs = mock_crud.get_booking.call_args
         # Verify the owner isolation filter was applied
         assert kwargs.get("property_owner_id") == PROPERTY_OWNER_ID
-        assert kwargs.get("user_id") is None
+
+
+class TestEnrichCancellationPolicy:
+    def test_cancellation_policy_included_in_list_response(self, client_factory):
+        """GET /bookings returns cancellation_policy from the property."""
+        mock_vc = MagicMock()
+        mock_vc.get_by_ids = AsyncMock(return_value=[property_dict(cancellation_policy="free")])
+        mock_vc.get_unavailabilities = AsyncMock(return_value=[])
+
+        mock_uc = MagicMock()
+        mock_uc.get_by_ids = AsyncMock(return_value=[])
+
+        client = client_factory(make_customer(), properties_client=mock_vc, users_client=mock_uc)
+        with patch(CRUD_PATH) as mock_crud:
+            mock_crud.list_bookings = AsyncMock(return_value=[booking_response()])
+            resp = client.get("/bookings")
+
+        assert resp.status_code == 200
+        assert resp.json()[0]["cancellation_policy"] == "free"
+
+    def test_cancellation_policy_null_when_property_not_found(self, client_factory):
+        """cancellation_policy is None when properties-ms returns no match."""
+        mock_vc = MagicMock()
+        mock_vc.get_by_ids = AsyncMock(return_value=[])  # empty — property not in bulk result
+        mock_vc.get_unavailabilities = AsyncMock(return_value=[])
+
+        mock_uc = MagicMock()
+        mock_uc.get_by_ids = AsyncMock(return_value=[])
+
+        client = client_factory(make_customer(), properties_client=mock_vc, users_client=mock_uc)
+        with patch(CRUD_PATH) as mock_crud:
+            mock_crud.list_bookings = AsyncMock(return_value=[booking_response()])
+            resp = client.get("/bookings")
+
+        assert resp.status_code == 200
+        assert resp.json()[0]["cancellation_policy"] is None

@@ -80,6 +80,7 @@ class BookingEnriched(BookingResponse):
     """BookingResponse extended with human-readable names from upstream services."""
 
     property_name: str | None = None
+    cancellation_policy: str | None = None
     customer_username: str | None = None
     customer_full_name: str | None = None
     owner_username: str | None = None

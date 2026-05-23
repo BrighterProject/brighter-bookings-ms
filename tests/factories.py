@@ -122,6 +122,7 @@ def property_dict(**overrides) -> dict:
         gap_tax_pct="0.00",
         gap_last_minute_window=7,
         gap_adjacent_only=True,
+        cancellation_policy="moderate",
     )
     return {**base, **overrides}
 

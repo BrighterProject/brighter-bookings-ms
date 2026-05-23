@@ -69,7 +69,13 @@ async def _enrich(
         users_client.get_by_ids(user_ids, current_user),
     )
 
-    property_map: dict[str, str | None] = {v["id"]: v.get("name") for v in properties_raw}
+    property_map: dict[str, dict] = {
+        v["id"]: {
+            "name": v.get("name"),
+            "cancellation_policy": v.get("cancellation_policy"),
+        }
+        for v in properties_raw
+    }
     user_map: dict[str, dict] = {
         u["id"]: {"username": u.get("username"), "full_name": u.get("full_name")}
         for u in users_raw
@@ -77,12 +83,14 @@ async def _enrich(
 
     result = []
     for b in parsed:
+        prop_data = property_map.get(str(b.property_id), {})
         customer = user_map.get(str(b.user_id), {})
         owner = user_map.get(str(b.property_owner_id), {})
         result.append(
             BookingEnriched(
                 **b.model_dump(),
-                property_name=property_map.get(str(b.property_id)),
+                property_name=prop_data.get("name"),
+                cancellation_policy=prop_data.get("cancellation_policy"),
                 customer_username=customer.get("username"),
                 customer_full_name=customer.get("full_name"),
                 owner_username=owner.get("username"),
