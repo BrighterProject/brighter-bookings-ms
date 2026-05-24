@@ -10,6 +10,7 @@ from slowapi.errors import RateLimitExceeded
 from app.limiter import limiter
 from app.logging import setup_logging
 from app.settings import db_url
+from app.telemetry import setup_telemetry
 
 TORTOISE_ORM = {
     "connections": {"default": db_url},
@@ -36,4 +37,5 @@ application.add_middleware(
     allow_headers=["*"],
 )
 
+setup_telemetry(application, "brighter-bookings-ms")
 setup_app(application, db_url, Path("app") / "routers", ["app.models"])
