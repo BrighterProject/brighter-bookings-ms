@@ -149,3 +149,6 @@ uv run tortoise -c main.TORTOISE_ORM migrate
 | `PAYMENTS_MS_URL` | `http://localhost:8003` | Payments microservice base URL     |
 | `REDIS_URL`       | `redis://localhost:6379/0` | Redis connection string (cache)  |
 | `SLOWAPI_NO_LIMITS` | unset | Set `true` in tests to disable rate limiting on `/slots` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://otel-collector:4317` | OTLP gRPC endpoint |
+| `OTEL_SDK_DISABLED` | `false` | Set `true` to skip telemetry (CI / light dev) |
+| `LOG_COLORIZE` | `false` | Set `true` for ANSI-coloured logs in compose |
