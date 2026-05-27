@@ -40,8 +40,7 @@ def setup_telemetry(app: FastAPI, service_name: str) -> None:
     trace.set_tracer_provider(tracer_provider)
 
     # Metrics — expose in Prometheus pull format on /metrics
-    prefix = service_name.replace("-", "_")
-    reader = PrometheusMetricReader(prefix=prefix)
+    reader = PrometheusMetricReader()
     meter_provider = MeterProvider(resource=resource, metric_readers=[reader])
     metrics.set_meter_provider(meter_provider)
 
