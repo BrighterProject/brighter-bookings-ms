@@ -8,13 +8,12 @@ from loguru import logger
 
 from app.cache import get_slots_cache, invalidate_slots_cache, set_slots_cache
 from app.crud import booking_crud
-from app.limiter import limiter
 from app.deps import (
     CurrentUser,
     NotificationsClient,
     PaymentsClient,
-    UsersClient,
     PropertiesClient,
+    UsersClient,
     _get_system_admin,
     can_admin_delete_booking,
     can_read_or_manage_booking,
@@ -22,9 +21,11 @@ from app.deps import (
     get_current_user,
     get_notifications_client,
     get_payments_client,
-    get_users_client,
     get_properties_client,
+    get_users_client,
 )
+from app.i18n import format_date, format_short_date
+from app.limiter import limiter
 from app.pricing_client import PricingClient, get_pricing_client
 from app.schemas import (
     BookingCreate,
@@ -77,8 +78,7 @@ async def _enrich(
         for v in properties_raw
     }
     user_map: dict[str, dict] = {
-        u["id"]: {"username": u.get("username"), "full_name": u.get("full_name")}
-        for u in users_raw
+        u["id"]: {"username": u.get("username"), "full_name": u.get("full_name")} for u in users_raw
     }
 
     result = []
@@ -122,39 +122,41 @@ async def _notify_booking_created(
     guest_locale: str = "en",
 ) -> None:
     admin = _get_system_admin()
-    users = await users_client.get_by_ids(
-        {booking.property_owner_id}, admin
-    )
+    users = await users_client.get_by_ids({booking.property_owner_id}, admin)
     owner: dict = users[0] if users else {}
     owner_email: str | None = owner.get("email")
     owner_locale: str = owner.get("locale", "en")
 
     prop_label = property_name or "Your property"
-    start_date_formatted = booking.start_date.strftime("%b %d")
-    end_date_formatted = booking.end_date.strftime("%b %d")
-    data = {
-        "property_name": prop_label,
-        "start_date": start_date_formatted,
-        "end_date": end_date_formatted,
-        "booking_id": str(booking.id),
-        "property_id": str(booking.property_id),
-    }
+
+    def _data_for(locale: str) -> dict:
+        return {
+            "property_name": prop_label,
+            "start_date": format_short_date(booking.start_date, locale),
+            "end_date": format_short_date(booking.end_date, locale),
+            "booking_id": str(booking.id),
+            "property_id": str(booking.property_id),
+        }
 
     coros = []
     if booking.guest_email:
-        coros.append(nc.send(
-            to=booking.guest_email,
-            notification_type="booking_created_guest",
-            data=data,
-            locale=guest_locale,
-        ))
+        coros.append(
+            nc.send(
+                to=booking.guest_email,
+                notification_type="booking_created_guest",
+                data=_data_for(guest_locale),
+                locale=guest_locale,
+            )
+        )
     if owner_email:
-        coros.append(nc.send(
-            to=owner_email,
-            notification_type="booking_created_owner",
-            data=data,
-            locale=owner_locale,
-        ))
+        coros.append(
+            nc.send(
+                to=owner_email,
+                notification_type="booking_created_owner",
+                data=_data_for(owner_locale),
+                locale=owner_locale,
+            )
+        )
     if coros:
         await asyncio.gather(*coros, return_exceptions=True)
 
@@ -165,6 +167,7 @@ async def _notify_booking_status_changed(
     users_client: UsersClient,
     nc: NotificationsClient,
     properties_client: PropertiesClient,
+    refund_amount: float = 0.0,
 ) -> None:
     from datetime import datetime as _dt
 
@@ -192,8 +195,8 @@ async def _notify_booking_status_changed(
         "booking_id": str(booking.id),
         "property_id": str(booking.property_id),
         "property_name": property_name or "Your property",
-        "start_date": start.strftime("%d %B %Y"),
-        "end_date": end.strftime("%d %B %Y"),
+        "start_date": format_date(start, guest_locale),
+        "end_date": format_date(end, guest_locale),
         "num_nights": str(num_nights),
         "currency": str(booking.currency),
         "total_price": f"{float(booking.total_price):.2f}",
@@ -213,7 +216,8 @@ async def _notify_booking_status_changed(
     elif new_status == BookingStatus.CANCELLED:
         cancelled_data = {
             **base_data,
-            "cancelled_date": _dt.now().strftime("%d %B %Y"),
+            "cancelled_date": format_date(_dt.now().date(), guest_locale),
+            "refund_amount": f"{refund_amount:.2f}",
         }
         await nc.send(
             to=guest_email,
@@ -276,8 +280,7 @@ def _assert_transition(
         )
 
     is_admin = (
-        BookingScope.ADMIN in current_user.scopes
-        or BookingScope.ADMIN_WRITE in current_user.scopes
+        BookingScope.ADMIN in current_user.scopes or BookingScope.ADMIN_WRITE in current_user.scopes
     )
     if is_admin:
         return
@@ -327,7 +330,8 @@ async def get_occupied_property_ids(
     bookings overlapping [from_date, to_date). Used by properties-ms availability search.
     Public — no auth required (property IDs are not sensitive).
     """
-    from app.models import Booking, BookingStatus as BS
+    from app.models import Booking
+    from app.models import BookingStatus as BS
 
     property_ids = await Booking.filter(
         status__in=[BS.PENDING, BS.CONFIRMED],
@@ -369,11 +373,9 @@ async def list_bookings(
     users_client: UsersClient = Depends(get_users_client),
 ) -> list[BookingEnriched]:
     is_admin = (
-        BookingScope.ADMIN in current_user.scopes
-        or BookingScope.ADMIN_READ in current_user.scopes
+        BookingScope.ADMIN in current_user.scopes or BookingScope.ADMIN_READ in current_user.scopes
     )
     is_manager = BookingScope.MANAGE in current_user.scopes
-    is_reader = BookingScope.READ in current_user.scopes
 
     if is_admin:
         bookings = await booking_crud.list_bookings(filters=filters)
@@ -384,9 +386,7 @@ async def list_bookings(
             filters=filters, property_owner_id=current_user.id
         )
     else:
-        bookings = await booking_crud.list_bookings(
-            filters=filters, user_id=current_user.id
-        )
+        bookings = await booking_crud.list_bookings(filters=filters, user_id=current_user.id)
 
     return await _enrich(bookings, current_user, properties_client, users_client)
 
@@ -412,9 +412,7 @@ async def create_booking(
     if property.get("status") != "active":
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=(
-                f"Property is not available for booking (status: {property.get('status')})"
-            ),
+            detail=(f"Property is not available for booking (status: {property.get('status')})"),
         )
 
     # 1b. Min-nights + gap filler validation
@@ -443,12 +441,8 @@ async def create_booking(
         # If adjacent_only: verify there are bookings immediately before and after
         if gap_adjacent_only:
             occupied_slots = await booking_crud.list_occupied_slots(payload.property_id)
-            has_before = any(
-                slot.end_date == payload.start_date for slot in occupied_slots
-            )
-            has_after = any(
-                slot.start_date == payload.end_date for slot in occupied_slots
-            )
+            has_before = any(slot.end_date == payload.start_date for slot in occupied_slots)
+            has_after = any(slot.start_date == payload.end_date for slot in occupied_slots)
             if not (has_before and has_after):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -520,66 +514,82 @@ async def get_booking(
     users_client: UsersClient = Depends(get_users_client),
 ) -> BookingEnriched:
     is_admin = (
-        BookingScope.ADMIN in current_user.scopes
-        or BookingScope.ADMIN_READ in current_user.scopes
+        BookingScope.ADMIN in current_user.scopes or BookingScope.ADMIN_READ in current_user.scopes
     )
     is_manager = BookingScope.MANAGE in current_user.scopes
-    is_reader = BookingScope.READ in current_user.scopes
 
     if is_admin:
         booking = await booking_crud.get_booking(booking_id)
     elif is_manager:
-        booking = await booking_crud.get_booking(
-            booking_id, property_owner_id=current_user.id
-        )
+        booking = await booking_crud.get_booking(booking_id, property_owner_id=current_user.id)
     else:
         booking = await booking_crud.get_booking(booking_id, user_id=current_user.id)
 
     if not booking:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
 
     results = await _enrich([booking], current_user, properties_client, users_client)
     return results[0]
 
 
-_MODERATE_REFUND_THRESHOLD_DAYS = 5
+# Tiered guest-cancellation refund schedule (Booking.com-style), keyed by the
+# property's cancellation_policy. Each entry is an ordered tuple of
+# (minimum days until check-in, refunded fraction of total_price); evaluated
+# top-down, the first tier whose threshold is met wins. Unknown policies and
+# cancellations that meet no tier refund nothing. Tweak the numbers here only.
+_REFUND_SCHEDULE: dict[str, tuple[tuple[int, float], ...]] = {
+    "free": ((1, 1.0),),
+    "moderate": ((5, 1.0), (0, 0.5)),
+    "strict": ((7, 0.5),),
+}
+
+
+def _refund_fraction(policy: str, days_until: int) -> float:
+    """Return the fraction (0.0–1.0) of total_price refundable on a guest cancel."""
+    for min_days, fraction in _REFUND_SCHEDULE.get(policy, ()):
+        if days_until >= min_days:
+            return fraction
+    return 0.0
 
 
 async def _apply_guest_cancel_refund(
     booking_id: UUID,
     property_id: UUID,
     check_in: date,
+    total_price: float,
     properties_client: PropertiesClient,
     payments_client: PaymentsClient,
-) -> None:
+) -> float:
     """
     Apply the property's cancellation_policy when a guest cancels a confirmed booking.
 
-    - free    → always refund
-    - moderate → refund only if check-in is more than 5 days away
-    - strict  → no refund
+    The refundable fraction is resolved from ``_REFUND_SCHEDULE`` based on the
+    policy and how many days remain until check-in, then a partial (or full)
+    refund is requested from payments-ms.
 
     Failures are swallowed so they never affect the cancel response.
+
+    Returns:
+        The amount actually refunded, or ``0.0`` when no refund is due / it fails.
     """
     try:
-        property_data = await properties_client.get_property(
-            property_id, _get_system_admin()
-        )
+        property_data = await properties_client.get_property(property_id, _get_system_admin())
         if not property_data:
-            return
+            return 0.0
         policy = property_data.get("cancellation_policy", "strict")
+        days_until = (check_in - date.today()).days
+        fraction = _refund_fraction(policy, days_until)
+        if fraction <= 0:
+            return 0.0
 
-        if policy == "free":
-            await payments_client.refund_booking(booking_id, _get_system_admin())
-        elif policy == "moderate":
-            days_until = (check_in - date.today()).days
-            if days_until > _MODERATE_REFUND_THRESHOLD_DAYS:
-                await payments_client.refund_booking(booking_id, _get_system_admin())
-        # strict: no refund
+        refund_amount = round(total_price * fraction, 2)
+        # A full refund passes amount == total_price; payments-ms treats an
+        # amount >= the captured total as a full refund.
+        if await payments_client.refund_booking(booking_id, _get_system_admin(), refund_amount):
+            return refund_amount
     except Exception:
         logger.exception("Guest cancel refund check failed for booking {}", booking_id)
+    return 0.0
 
 
 @router.patch("/{booking_id}/status", response_model=BookingResponse)
@@ -597,9 +607,7 @@ async def update_booking_status(
     # Fetch the booking without ownership filter — we validate permissions manually
     booking = await booking_crud.get_booking(booking_id)
     if not booking:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
 
     _assert_transition(
         old_status=booking.status,
@@ -611,9 +619,7 @@ async def update_booking_status(
 
     updated = await booking_crud.update_booking_status(booking_id, payload)
     if not updated:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
 
     await invalidate_slots_cache(booking.property_id)
 
@@ -622,25 +628,24 @@ async def update_booking_status(
     # - Guest cancellations of CONFIRMED bookings apply the property's cancellation_policy.
     # - Guest cancellations of PENDING bookings never refund (no payment taken yet).
     # Failure to refund does not block the cancellation response.
+    refund_amount = 0.0
     if payload.status == BookingStatus.CANCELLED:
         is_admin = (
             BookingScope.ADMIN in current_user.scopes
             or BookingScope.ADMIN_WRITE in current_user.scopes
         )
         is_property_owner = current_user.id == booking.property_owner_id
-        is_guest = (
-            current_user.id == booking.user_id
-            and not is_admin
-            and not is_property_owner
-        )
+        is_guest = current_user.id == booking.user_id and not is_admin and not is_property_owner
 
         if is_admin or is_property_owner:
-            await payments_client.refund_booking(booking_id, current_user)
+            if await payments_client.refund_booking(booking_id, current_user):
+                refund_amount = float(booking.total_price)
         elif is_guest and booking.status == BookingStatus.CONFIRMED:
-            await _apply_guest_cancel_refund(
+            refund_amount = await _apply_guest_cancel_refund(
                 booking_id,
                 booking.property_id,
                 booking.start_date,
+                float(booking.total_price),
                 properties_client,
                 payments_client,
             )
@@ -649,7 +654,12 @@ async def update_booking_status(
     if payload.status in {BookingStatus.CONFIRMED, BookingStatus.CANCELLED}:
         asyncio.create_task(
             _notify_booking_status_changed(
-                booking, payload.status, users_client, notifications_client, properties_client
+                booking,
+                payload.status,
+                users_client,
+                notifications_client,
+                properties_client,
+                refund_amount=refund_amount,
             )
         )
 
@@ -665,6 +675,4 @@ async def update_booking_status(
 async def delete_booking(request: Request, booking_id: UUID) -> None:
     deleted = await booking_crud.delete_booking(booking_id)
     if not deleted:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")

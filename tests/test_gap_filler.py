@@ -9,9 +9,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from app.schemas import BookingSlot
 
 from .factories import (
-    BOOKING_ID,
-    PROPERTY_ID,
-    PROPERTY_OWNER_ID,
     booking_create_payload,
     booking_response,
     make_customer,
@@ -54,10 +51,12 @@ class TestGapFillerValidation:
             pricing_client=_mock_pricing("100.00", "50.00"),
         )
         with patch(CRUD_PATH) as mock_crud:
-            mock_crud.create_booking = AsyncMock(return_value=booking_response(
-                start_date=start.isoformat(),
-                end_date=end.isoformat(),
-            ))
+            mock_crud.create_booking = AsyncMock(
+                return_value=booking_response(
+                    start_date=start.isoformat(),
+                    end_date=end.isoformat(),
+                )
+            )
             resp = client.post("/bookings", json=payload)
         assert resp.status_code == 201
 
@@ -79,9 +78,7 @@ class TestGapFillerValidation:
         assert resp.status_code == 400
         assert "minimum night requirement" in resp.json()["detail"]
 
-    def test_short_booking_gap_filler_enabled_outside_window_returns_400(
-        self, client_factory
-    ):
+    def test_short_booking_gap_filler_enabled_outside_window_returns_400(self, client_factory):
         """Gap filler enabled but check-in is beyond last-minute window → 400."""
         prop = property_dict(
             min_nights=3,
@@ -110,7 +107,7 @@ class TestGapFillerValidation:
         """Gap filler enabled, within window, adjacent bookings exist → 201 with gap premium."""
         today = date.today()
         start = today + timedelta(days=3)  # within 7-day window
-        end = start + timedelta(days=1)    # 1-night stay
+        end = start + timedelta(days=1)  # 1-night stay
 
         prop = property_dict(
             min_nights=3,
@@ -134,16 +131,21 @@ class TestGapFillerValidation:
         )
         with patch(CRUD_PATH) as mock_crud:
             mock_crud.list_occupied_slots = AsyncMock(return_value=adjacent_slots)
-            mock_crud.create_booking = AsyncMock(return_value=booking_response(
-                start_date=start.isoformat(),
-                end_date=end.isoformat(),
-                gap_adjustment_pct="20.00",
-                total_price="60.00",
-            ))
-            resp = client.post("/bookings", json=booking_create_payload(
-                start_date=start.isoformat(),
-                end_date=end.isoformat(),
-            ))
+            mock_crud.create_booking = AsyncMock(
+                return_value=booking_response(
+                    start_date=start.isoformat(),
+                    end_date=end.isoformat(),
+                    gap_adjustment_pct="20.00",
+                    total_price="60.00",
+                )
+            )
+            resp = client.post(
+                "/bookings",
+                json=booking_create_payload(
+                    start_date=start.isoformat(),
+                    end_date=end.isoformat(),
+                ),
+            )
 
         assert resp.status_code == 201
         data = resp.json()
@@ -153,10 +155,8 @@ class TestGapFillerValidation:
         _, kwargs = mock_crud.create_booking.call_args
         assert kwargs["gap_adjustment_pct"] == Decimal("20.00")
 
-    def test_short_booking_gap_adjacent_only_false_within_window_succeeds(
-        self, client_factory
-    ):
-        """Gap filler enabled, gap_adjacent_only=False, within window → 201 without adjacency check."""
+    def test_short_booking_gap_adjacent_only_false_within_window_succeeds(self, client_factory):
+        """Gap filler enabled, gap_adjacent_only=False, within window → 201 without adjacency check."""  # noqa: E501
         today = date.today()
         start = today + timedelta(days=1)
         end = start + timedelta(days=2)  # 2-night stay, min_nights=3
@@ -175,14 +175,19 @@ class TestGapFillerValidation:
             pricing_client=_mock_pricing("100.00", "50.00"),
         )
         with patch(CRUD_PATH) as mock_crud:
-            mock_crud.create_booking = AsyncMock(return_value=booking_response(
-                start_date=start.isoformat(),
-                end_date=end.isoformat(),
-            ))
-            resp = client.post("/bookings", json=booking_create_payload(
-                start_date=start.isoformat(),
-                end_date=end.isoformat(),
-            ))
+            mock_crud.create_booking = AsyncMock(
+                return_value=booking_response(
+                    start_date=start.isoformat(),
+                    end_date=end.isoformat(),
+                )
+            )
+            resp = client.post(
+                "/bookings",
+                json=booking_create_payload(
+                    start_date=start.isoformat(),
+                    end_date=end.isoformat(),
+                ),
+            )
         assert resp.status_code == 201
 
     def test_short_booking_gap_filler_adjacent_only_no_adjacent_bookings_returns_400(
@@ -207,9 +212,12 @@ class TestGapFillerValidation:
         )
         with patch(CRUD_PATH) as mock_crud:
             mock_crud.list_occupied_slots = AsyncMock(return_value=[])
-            resp = client.post("/bookings", json=booking_create_payload(
-                start_date=start.isoformat(),
-                end_date=end.isoformat(),
-            ))
+            resp = client.post(
+                "/bookings",
+                json=booking_create_payload(
+                    start_date=start.isoformat(),
+                    end_date=end.isoformat(),
+                ),
+            )
         assert resp.status_code == 400
         assert "minimum night requirement" in resp.json()["detail"]

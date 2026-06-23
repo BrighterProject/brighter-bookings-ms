@@ -37,7 +37,10 @@ class PricingClient:
         flat_total = (base_price * Decimal(num_nights)).quantize(Decimal("0.01"))
 
         url = f"{self._base_url}/properties/{property_id}/pricing/resolve"
-        params = {"start_date": start_date.isoformat(), "end_date": end_date.isoformat()}
+        params = {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+        }
 
         for attempt in range(2):
             try:

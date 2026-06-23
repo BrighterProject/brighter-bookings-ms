@@ -22,11 +22,11 @@ from app.deps import (
     can_write_booking,
     get_current_user,
     get_payments_client,
-    get_users_client,
     get_properties_client,
+    get_users_client,
 )
-from app.pricing_client import get_pricing_client
 from app.limiter import limiter
+from app.pricing_client import get_pricing_client
 from app.routers.booking import router
 
 from .factories import make_admin, make_customer, make_property_owner
@@ -69,7 +69,13 @@ def _noop_pricing_client():
 # ---------------------------------------------------------------------------
 
 
-def build_app(current_user, properties_client=None, users_client=None, payments_client=None, pricing_client=None) -> FastAPI:
+def build_app(
+    current_user,
+    properties_client=None,
+    users_client=None,
+    payments_client=None,
+    pricing_client=None,
+) -> FastAPI:
     """
     Fresh FastAPI app with auth/scope dependencies overridden to return
     `current_user` unconditionally.

@@ -1,4 +1,5 @@
 """Tests for OTEL telemetry wiring — /metrics endpoint and trace log patcher."""
+
 from __future__ import annotations
 
 import os
@@ -17,6 +18,7 @@ from app.telemetry import setup_telemetry
 def telemetry_app() -> FastAPI:
     """Minimal FastAPI app with telemetry wired — isolated from the global flag."""
     import app.telemetry as tel_module
+
     # Reset global so setup_telemetry actually runs for this test app
     tel_module._configured = False
     os.environ.pop("OTEL_SDK_DISABLED", None)
@@ -71,6 +73,7 @@ def test_trace_patcher_injects_real_ids_inside_span() -> None:
 
 def test_otel_disabled_env_var_skips_setup() -> None:
     import app.telemetry as tel_module
+
     tel_module._configured = False
     os.environ["OTEL_SDK_DISABLED"] = "true"
     app_ = FastAPI()
