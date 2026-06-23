@@ -1,4 +1,5 @@
 """Export FastAPI OpenAPI schema to openapi.json without starting the server."""
+
 import json
 import sys
 from pathlib import Path

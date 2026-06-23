@@ -338,7 +338,7 @@ async def get_occupied_property_ids(
         start_date__lt=to_date,
         end_date__gt=from_date,
     ).values_list("property_id", flat=True)
-    return list(set(property_ids))
+    return list(set(property_ids))  # type: ignore[return-value]
 
 
 @router.get("/slots", response_model=list[BookingSlot])

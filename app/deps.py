@@ -189,7 +189,7 @@ class PropertiesClient:
         try:
             params = [("ids", str(vid)) for vid in property_ids]
             resp = await self._client.get(
-                "/properties/bulk", params=params, headers=self._headers(user)
+                "/properties/bulk", params=params, headers=self._headers(user)  # type: ignore
             )
             if resp.status_code >= 400 or not resp.content:
                 return []
@@ -242,7 +242,7 @@ class UsersClient:
             return []
         try:
             params = [("ids", str(uid)) for uid in user_ids]
-            resp = await self._client.get("/users/bulk", params=params, headers=self._headers(user))
+            resp = await self._client.get("/users/bulk", params=params, headers=self._headers(user))  # type: ignore
             if resp.status_code >= 400 or not resp.content:
                 return []
             return resp.json()

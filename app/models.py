@@ -41,6 +41,6 @@ class Booking(Model):
     payment_method = fields.CharField(max_length=20, null=True)  # card | bank_transfer | cash
     updated_at = fields.DatetimeField(auto_now=True)
 
-    class Meta:  # type: ignore
+    class Meta:
         table = "bookings"
         ordering = ["-created_at"]
