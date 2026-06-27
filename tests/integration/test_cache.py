@@ -36,8 +36,14 @@ class TestSlotsCache:
 
     async def test_set_overwrites_existing_entry(self):
         property_id = uuid4()
-        slot_a = {"start_datetime": "2026-06-01T14:00:00", "end_datetime": "2026-06-02T11:00:00"}
-        slot_b = {"start_datetime": "2026-07-01T14:00:00", "end_datetime": "2026-07-03T11:00:00"}
+        slot_a = {
+            "start_datetime": "2026-06-01T14:00:00",
+            "end_datetime": "2026-06-02T11:00:00",
+        }
+        slot_b = {
+            "start_datetime": "2026-07-01T14:00:00",
+            "end_datetime": "2026-07-03T11:00:00",
+        }
         await set_slots_cache(property_id, [slot_a])
         await set_slots_cache(property_id, [slot_b])
         result = await get_slots_cache(property_id)

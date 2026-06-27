@@ -10,6 +10,18 @@ from slowapi.errors import RateLimitExceeded
 from app.limiter import limiter
 from app.logging import setup_logging
 from app.settings import db_url
+from app.telemetry import setup_telemetry
+
+TORTOISE_ORM = {
+    "connections": {"default": db_url},
+    "apps": {
+        "models": {
+            "models": ["app.models"],
+            "default_connection": "default",
+            "migrations": "migrations.models",
+        },
+    },
+}
 
 setup_logging()
 
@@ -25,6 +37,5 @@ application.add_middleware(
     allow_headers=["*"],
 )
 
-tortoise_conf = setup_app(
-    application, db_url, Path("app") / "routers", ["app.models", "aerich.models"]
-)
+setup_telemetry(application, "brighter-bookings-ms")
+setup_app(application, db_url, Path("app") / "routers", ["app.models"])

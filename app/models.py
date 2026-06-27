@@ -37,8 +37,10 @@ class Booking(Model):
     guest_phone = fields.CharField(max_length=50, null=True)
     guest_country = fields.CharField(max_length=2, null=True)  # ISO 3166-1 alpha-2
     special_requests = fields.TextField(null=True)
+    gap_adjustment_pct = fields.DecimalField(max_digits=5, decimal_places=2, default=0)
+    payment_method = fields.CharField(max_length=20, null=True)  # card | bank_transfer | cash
     updated_at = fields.DatetimeField(auto_now=True)
 
-    class Meta:  # type: ignore
+    class Meta:
         table = "bookings"
         ordering = ["-created_at"]

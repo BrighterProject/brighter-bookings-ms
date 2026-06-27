@@ -9,6 +9,7 @@ Testing strategy:
 
 from __future__ import annotations
 
+from datetime import date, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi.testclient import TestClient
@@ -26,8 +27,8 @@ from .factories import (
     booking_response,
     make_customer,
     make_property_owner,
-    user_dict,
     property_dict,
+    user_dict,
 )
 
 
@@ -250,9 +251,7 @@ class TestUpdateBookingStatus:
         with patch(CRUD_PATH) as mock_crud:
             mock_crud.get_booking = AsyncMock(return_value=pending)
             mock_crud.update_booking_status = AsyncMock(return_value=confirmed)
-            resp = client.patch(
-                f"/bookings/{BOOKING_ID}/status", json={"status": "confirmed"}
-            )
+            resp = client.patch(f"/bookings/{BOOKING_ID}/status", json={"status": "confirmed"})
         assert resp.status_code == 200
         assert resp.json()["status"] == "confirmed"
 
@@ -276,9 +275,7 @@ class TestUpdateBookingStatus:
         )
         with patch(CRUD_PATH) as mock_crud:
             mock_crud.get_booking = AsyncMock(return_value=pending)
-            resp = client.patch(
-                f"/bookings/{BOOKING_ID}/status", json={"status": "confirmed"}
-            )
+            resp = client.patch(f"/bookings/{BOOKING_ID}/status", json={"status": "confirmed"})
         assert resp.status_code == 403
 
     def test_customer_cancels_own_booking(self, client_factory):
@@ -292,9 +289,7 @@ class TestUpdateBookingStatus:
         with patch(CRUD_PATH) as mock_crud:
             mock_crud.get_booking = AsyncMock(return_value=pending)
             mock_crud.update_booking_status = AsyncMock(return_value=cancelled)
-            resp = client.patch(
-                f"/bookings/{BOOKING_ID}/status", json={"status": "cancelled"}
-            )
+            resp = client.patch(f"/bookings/{BOOKING_ID}/status", json={"status": "cancelled"})
         assert resp.status_code == 200
         assert resp.json()["status"] == "cancelled"
 
@@ -323,9 +318,7 @@ class TestUpdateBookingStatus:
         with patch(CRUD_PATH) as mock_crud:
             mock_crud.get_booking = AsyncMock(return_value=pending)
             mock_crud.update_booking_status = AsyncMock(return_value=cancelled)
-            resp = client.patch(
-                f"/bookings/{BOOKING_ID}/status", json={"status": "cancelled"}
-            )
+            resp = client.patch(f"/bookings/{BOOKING_ID}/status", json={"status": "cancelled"})
         assert resp.status_code == 200
         assert resp.json()["status"] == "cancelled"
 
@@ -343,37 +336,27 @@ class TestUpdateBookingStatus:
         )
         with patch(CRUD_PATH) as mock_crud:
             mock_crud.get_booking = AsyncMock(return_value=pending)
-            resp = client.patch(
-                f"/bookings/{BOOKING_ID}/status", json={"status": "cancelled"}
-            )
+            resp = client.patch(f"/bookings/{BOOKING_ID}/status", json={"status": "cancelled"})
         assert resp.status_code == 403
 
     def test_property_owner_completes_confirmed_booking(self, client_factory):
         client = client_factory(make_property_owner())
-        confirmed = booking_model(
-            status="confirmed", property_owner_id=str(PROPERTY_OWNER_ID)
-        )
+        confirmed = booking_model(status="confirmed", property_owner_id=str(PROPERTY_OWNER_ID))
         completed = booking_response(status="completed")
         with patch(CRUD_PATH) as mock_crud:
             mock_crud.get_booking = AsyncMock(return_value=confirmed)
             mock_crud.update_booking_status = AsyncMock(return_value=completed)
-            resp = client.patch(
-                f"/bookings/{BOOKING_ID}/status", json={"status": "completed"}
-            )
+            resp = client.patch(f"/bookings/{BOOKING_ID}/status", json={"status": "completed"})
         assert resp.status_code == 200
 
     def test_property_owner_marks_no_show(self, client_factory):
         client = client_factory(make_property_owner())
-        confirmed = booking_model(
-            status="confirmed", property_owner_id=str(PROPERTY_OWNER_ID)
-        )
+        confirmed = booking_model(status="confirmed", property_owner_id=str(PROPERTY_OWNER_ID))
         no_show = booking_response(status="no_show")
         with patch(CRUD_PATH) as mock_crud:
             mock_crud.get_booking = AsyncMock(return_value=confirmed)
             mock_crud.update_booking_status = AsyncMock(return_value=no_show)
-            resp = client.patch(
-                f"/bookings/{BOOKING_ID}/status", json={"status": "no_show"}
-            )
+            resp = client.patch(f"/bookings/{BOOKING_ID}/status", json={"status": "no_show"})
         assert resp.status_code == 200
 
     def test_invalid_transition_from_cancelled_returns_400(self, admin_client):
@@ -414,9 +397,7 @@ class TestUpdateBookingStatus:
         assert resp.status_code == 404
 
     def test_invalid_status_value_returns_422(self, admin_client):
-        resp = admin_client.patch(
-            f"/bookings/{BOOKING_ID}/status", json={"status": "flying"}
-        )
+        resp = admin_client.patch(f"/bookings/{BOOKING_ID}/status", json={"status": "flying"})
         assert resp.status_code == 422
 
 
@@ -463,9 +444,7 @@ class TestEnrichment:
 
     def test_list_returns_owner_username(self, client_factory):
         vc = self._mock_vc()
-        uc = self._mock_uc(
-            [user_dict(user_id=PROPERTY_OWNER_ID, username="owner42")]
-        )
+        uc = self._mock_uc([user_dict(user_id=PROPERTY_OWNER_ID, username="owner42")])
         client = client_factory(make_customer(), properties_client=vc, users_client=uc)
         with patch(CRUD_PATH) as mock_crud:
             mock_crud.list_bookings = AsyncMock(return_value=[booking_response()])
@@ -537,9 +516,11 @@ SLOT = BookingSlot(
 
 class TestGetSlots:
     def test_returns_slots_unauthenticated(self, anon_app):
-        with patch("app.routers.booking.get_slots_cache", return_value=None), \
-             patch("app.routers.booking.set_slots_cache"), \
-             patch(CRUD_PATH) as mock_crud:
+        with (
+            patch("app.routers.booking.get_slots_cache", return_value=None),
+            patch("app.routers.booking.set_slots_cache"),
+            patch(CRUD_PATH) as mock_crud,
+        ):
             mock_crud.list_occupied_slots = AsyncMock(return_value=[SLOT])
             with TestClient(anon_app) as c:
                 resp = c.get(f"/bookings/slots?property_id={PROPERTY_ID}")
@@ -547,9 +528,11 @@ class TestGetSlots:
         assert len(resp.json()) == 1
 
     def test_returns_empty_list_when_no_bookings(self, anon_app):
-        with patch("app.routers.booking.get_slots_cache", return_value=None), \
-             patch("app.routers.booking.set_slots_cache"), \
-             patch(CRUD_PATH) as mock_crud:
+        with (
+            patch("app.routers.booking.get_slots_cache", return_value=None),
+            patch("app.routers.booking.set_slots_cache"),
+            patch(CRUD_PATH) as mock_crud,
+        ):
             mock_crud.list_occupied_slots = AsyncMock(return_value=[])
             with TestClient(anon_app) as c:
                 resp = c.get(f"/bookings/slots?property_id={PROPERTY_ID}")
@@ -558,9 +541,11 @@ class TestGetSlots:
 
     def test_serves_from_cache(self, anon_app):
         cached = [SLOT.model_dump(mode="json")]
-        with patch("app.routers.booking.get_slots_cache", return_value=cached):
-            with TestClient(anon_app) as c:
-                resp = c.get(f"/bookings/slots?property_id={PROPERTY_ID}")
+        with (
+            patch("app.routers.booking.get_slots_cache", return_value=cached),
+            TestClient(anon_app) as c,
+        ):
+            resp = c.get(f"/bookings/slots?property_id={PROPERTY_ID}")
         assert resp.status_code == 200
         assert len(resp.json()) == 1
 
@@ -610,7 +595,7 @@ class TestCreateBookingPricing:
 
     def test_pricing_client_called_with_correct_args(self, client_factory):
         """resolve() is called with the property_id and dates from the payload."""
-        from .factories import PROPERTY_ID, START_DATE, END_DATE
+        from .factories import END_DATE, PROPERTY_ID, START_DATE
 
         prc = self._pricing_client()
         client = client_factory(
@@ -644,6 +629,39 @@ class TestCreateBookingPricing:
         assert resp.status_code == 201
         _, kwargs = mock_crud.create_booking.call_args
         assert kwargs["total_price"] == Decimal("100.00")
+
+
+# ---------------------------------------------------------------------------
+# Payment method field
+# ---------------------------------------------------------------------------
+
+
+class TestPaymentMethodField:
+    def _mock_vc(self) -> MagicMock:
+        mock_vc = MagicMock()
+        mock_vc.get_property = AsyncMock(return_value=property_dict())
+        mock_vc.get_unavailabilities = AsyncMock(return_value=[])
+        return mock_vc
+
+    def test_booking_created_with_payment_method(self, client_factory):
+        client = client_factory(make_customer(), properties_client=self._mock_vc())
+        payload = booking_create_payload()
+        payload["payment_method"] = "bank_transfer"
+        with patch(CRUD_PATH) as mock_crud:
+            mock_crud.create_booking = AsyncMock(
+                return_value=booking_response(payment_method="bank_transfer")
+            )
+            resp = client.post("/bookings", json=payload)
+        assert resp.status_code == 201
+        assert resp.json()["payment_method"] == "bank_transfer"
+
+    def test_booking_created_without_payment_method_defaults_none(self, client_factory):
+        client = client_factory(make_customer(), properties_client=self._mock_vc())
+        with patch(CRUD_PATH) as mock_crud:
+            mock_crud.create_booking = AsyncMock(return_value=booking_response(payment_method=None))
+            resp = client.post("/bookings", json=booking_create_payload())
+        assert resp.status_code == 201
+        assert resp.json()["payment_method"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -690,4 +708,278 @@ class TestOwnerBookingIsolation:
         _, kwargs = mock_crud.get_booking.call_args
         # Verify the owner isolation filter was applied
         assert kwargs.get("property_owner_id") == PROPERTY_OWNER_ID
-        assert kwargs.get("user_id") is None
+
+
+class TestEnrichCancellationPolicy:
+    def test_cancellation_policy_included_in_list_response(self, client_factory):
+        """GET /bookings returns cancellation_policy from the property."""
+        mock_vc = MagicMock()
+        mock_vc.get_by_ids = AsyncMock(return_value=[property_dict(cancellation_policy="free")])
+        mock_vc.get_unavailabilities = AsyncMock(return_value=[])
+
+        mock_uc = MagicMock()
+        mock_uc.get_by_ids = AsyncMock(return_value=[])
+
+        client = client_factory(make_customer(), properties_client=mock_vc, users_client=mock_uc)
+        with patch(CRUD_PATH) as mock_crud:
+            mock_crud.list_bookings = AsyncMock(return_value=[booking_response()])
+            resp = client.get("/bookings")
+
+        assert resp.status_code == 200
+        assert resp.json()[0]["cancellation_policy"] == "free"
+
+    def test_cancellation_policy_null_when_property_not_found(self, client_factory):
+        """cancellation_policy is None when properties-ms returns no match."""
+        mock_vc = MagicMock()
+        mock_vc.get_by_ids = AsyncMock(return_value=[])  # empty — property not in bulk result
+        mock_vc.get_unavailabilities = AsyncMock(return_value=[])
+
+        mock_uc = MagicMock()
+        mock_uc.get_by_ids = AsyncMock(return_value=[])
+
+        client = client_factory(make_customer(), properties_client=mock_vc, users_client=mock_uc)
+        with patch(CRUD_PATH) as mock_crud:
+            mock_crud.list_bookings = AsyncMock(return_value=[booking_response()])
+            resp = client.get("/bookings")
+
+        assert resp.status_code == 200
+        assert resp.json()[0]["cancellation_policy"] is None
+
+
+# ---------------------------------------------------------------------------
+# Guest cancel refund policy
+# ---------------------------------------------------------------------------
+
+
+class TestGuestCancelRefundPolicy:
+    """
+    Cancelling a CONFIRMED booking as a guest triggers or skips a Stripe refund
+    depending on the property's cancellation_policy.
+    """
+
+    def _make_client_and_mocks(
+        self,
+        client_factory,
+        cancellation_policy: str,
+        days_until_checkin: int,
+    ):
+        check_in = date.today() + timedelta(days=days_until_checkin)
+
+        mock_vc = MagicMock()
+        mock_vc.get_property = AsyncMock(
+            return_value=property_dict(cancellation_policy=cancellation_policy)
+        )
+        mock_vc.get_by_ids = AsyncMock(return_value=[])
+        mock_vc.get_unavailabilities = AsyncMock(return_value=[])
+
+        mock_pc = MagicMock()
+        mock_pc.refund_booking = AsyncMock(return_value=True)
+
+        client = client_factory(
+            make_customer(user_id=CUSTOMER_ID),
+            properties_client=mock_vc,
+            payments_client=mock_pc,
+        )
+        return client, mock_vc, mock_pc, check_in
+
+    def test_free_policy_triggers_refund_on_guest_cancel(self, client_factory):
+        client, mock_vc, mock_pc, check_in = self._make_client_and_mocks(
+            client_factory, cancellation_policy="free", days_until_checkin=10
+        )
+        with patch(CRUD_PATH) as mock_crud:
+            mock_crud.get_booking = AsyncMock(
+                return_value=booking_model(
+                    status="confirmed",
+                    user_id=str(CUSTOMER_ID),
+                    start_date=check_in.isoformat(),
+                )
+            )
+            mock_crud.update_booking_status = AsyncMock(
+                return_value=booking_model(
+                    status="cancelled",
+                    user_id=str(CUSTOMER_ID),
+                    start_date=check_in.isoformat(),
+                )
+            )
+            resp = client.patch(f"/bookings/{BOOKING_ID}/status", json={"status": "cancelled"})
+
+        assert resp.status_code == 200
+        mock_pc.refund_booking.assert_awaited_once()
+
+    def test_strict_policy_skips_refund_on_guest_cancel(self, client_factory):
+        """strict, fewer than 7 days away -> no refund."""
+        client, mock_vc, mock_pc, check_in = self._make_client_and_mocks(
+            client_factory, cancellation_policy="strict", days_until_checkin=3
+        )
+        with patch(CRUD_PATH) as mock_crud:
+            mock_crud.get_booking = AsyncMock(
+                return_value=booking_model(
+                    status="confirmed",
+                    user_id=str(CUSTOMER_ID),
+                    start_date=check_in.isoformat(),
+                )
+            )
+            mock_crud.update_booking_status = AsyncMock(
+                return_value=booking_model(
+                    status="cancelled",
+                    user_id=str(CUSTOMER_ID),
+                    start_date=check_in.isoformat(),
+                )
+            )
+            resp = client.patch(f"/bookings/{BOOKING_ID}/status", json={"status": "cancelled"})
+
+        assert resp.status_code == 200
+        mock_pc.refund_booking.assert_not_awaited()
+
+    def test_moderate_policy_refunds_when_checkin_far_away(self, client_factory):
+        """More than 5 days away -> refund."""
+        client, mock_vc, mock_pc, check_in = self._make_client_and_mocks(
+            client_factory, cancellation_policy="moderate", days_until_checkin=10
+        )
+        with patch(CRUD_PATH) as mock_crud:
+            mock_crud.get_booking = AsyncMock(
+                return_value=booking_model(
+                    status="confirmed",
+                    user_id=str(CUSTOMER_ID),
+                    start_date=check_in.isoformat(),
+                )
+            )
+            mock_crud.update_booking_status = AsyncMock(
+                return_value=booking_model(
+                    status="cancelled",
+                    user_id=str(CUSTOMER_ID),
+                    start_date=check_in.isoformat(),
+                )
+            )
+            resp = client.patch(f"/bookings/{BOOKING_ID}/status", json={"status": "cancelled"})
+
+        assert resp.status_code == 200
+        mock_pc.refund_booking.assert_awaited_once()
+
+    def test_moderate_policy_partial_refund_when_checkin_close(self, client_factory):
+        """1-5 days away -> 50% partial refund (total_price 100.00 -> 50.00)."""
+        client, mock_vc, mock_pc, check_in = self._make_client_and_mocks(
+            client_factory, cancellation_policy="moderate", days_until_checkin=3
+        )
+        with patch(CRUD_PATH) as mock_crud:
+            mock_crud.get_booking = AsyncMock(
+                return_value=booking_model(
+                    status="confirmed",
+                    user_id=str(CUSTOMER_ID),
+                    start_date=check_in.isoformat(),
+                )
+            )
+            mock_crud.update_booking_status = AsyncMock(
+                return_value=booking_model(
+                    status="cancelled",
+                    user_id=str(CUSTOMER_ID),
+                    start_date=check_in.isoformat(),
+                )
+            )
+            resp = client.patch(f"/bookings/{BOOKING_ID}/status", json={"status": "cancelled"})
+
+        assert resp.status_code == 200
+        mock_pc.refund_booking.assert_awaited_once()
+        assert mock_pc.refund_booking.await_args.args[2] == 50.0
+
+    def test_moderate_policy_full_refund_at_exactly_5_days(self, client_factory):
+        """Exactly 5 days away -> full refund (threshold is >= 5)."""
+        client, mock_vc, mock_pc, check_in = self._make_client_and_mocks(
+            client_factory, cancellation_policy="moderate", days_until_checkin=5
+        )
+        with patch(CRUD_PATH) as mock_crud:
+            mock_crud.get_booking = AsyncMock(
+                return_value=booking_model(
+                    status="confirmed",
+                    user_id=str(CUSTOMER_ID),
+                    start_date=check_in.isoformat(),
+                )
+            )
+            mock_crud.update_booking_status = AsyncMock(
+                return_value=booking_model(
+                    status="cancelled",
+                    user_id=str(CUSTOMER_ID),
+                    start_date=check_in.isoformat(),
+                )
+            )
+            resp = client.patch(f"/bookings/{BOOKING_ID}/status", json={"status": "cancelled"})
+
+        assert resp.status_code == 200
+        mock_pc.refund_booking.assert_awaited_once()
+        assert mock_pc.refund_booking.await_args.args[2] == 100.0
+
+    def test_strict_policy_partial_refund_when_far_away(self, client_factory):
+        """strict, 14+ days away -> 50% partial refund (100.00 -> 50.00)."""
+        client, mock_vc, mock_pc, check_in = self._make_client_and_mocks(
+            client_factory, cancellation_policy="strict", days_until_checkin=20
+        )
+        with patch(CRUD_PATH) as mock_crud:
+            mock_crud.get_booking = AsyncMock(
+                return_value=booking_model(
+                    status="confirmed",
+                    user_id=str(CUSTOMER_ID),
+                    start_date=check_in.isoformat(),
+                )
+            )
+            mock_crud.update_booking_status = AsyncMock(
+                return_value=booking_model(
+                    status="cancelled",
+                    user_id=str(CUSTOMER_ID),
+                    start_date=check_in.isoformat(),
+                )
+            )
+            resp = client.patch(f"/bookings/{BOOKING_ID}/status", json={"status": "cancelled"})
+
+        assert resp.status_code == 200
+        mock_pc.refund_booking.assert_awaited_once()
+        assert mock_pc.refund_booking.await_args.args[2] == 50.0
+
+    def test_free_policy_skips_refund_when_checkin_imminent(self, client_factory):
+        """free, less than 1 day away -> no refund."""
+        client, mock_vc, mock_pc, check_in = self._make_client_and_mocks(
+            client_factory, cancellation_policy="free", days_until_checkin=0
+        )
+        with patch(CRUD_PATH) as mock_crud:
+            mock_crud.get_booking = AsyncMock(
+                return_value=booking_model(
+                    status="confirmed",
+                    user_id=str(CUSTOMER_ID),
+                    start_date=check_in.isoformat(),
+                )
+            )
+            mock_crud.update_booking_status = AsyncMock(
+                return_value=booking_model(
+                    status="cancelled",
+                    user_id=str(CUSTOMER_ID),
+                    start_date=check_in.isoformat(),
+                )
+            )
+            resp = client.patch(f"/bookings/{BOOKING_ID}/status", json={"status": "cancelled"})
+
+        assert resp.status_code == 200
+        mock_pc.refund_booking.assert_not_awaited()
+
+    def test_pending_booking_cancelled_by_guest_never_refunds(self, client_factory):
+        """PENDING -> CANCELLED by guest: no payment, so no refund regardless of policy."""
+        client, mock_vc, mock_pc, check_in = self._make_client_and_mocks(
+            client_factory, cancellation_policy="free", days_until_checkin=10
+        )
+        with patch(CRUD_PATH) as mock_crud:
+            mock_crud.get_booking = AsyncMock(
+                return_value=booking_model(
+                    status="pending",
+                    user_id=str(CUSTOMER_ID),
+                    start_date=check_in.isoformat(),
+                )
+            )
+            mock_crud.update_booking_status = AsyncMock(
+                return_value=booking_model(
+                    status="cancelled",
+                    user_id=str(CUSTOMER_ID),
+                    start_date=check_in.isoformat(),
+                )
+            )
+            resp = client.patch(f"/bookings/{BOOKING_ID}/status", json={"status": "cancelled"})
+
+        assert resp.status_code == 200
+        mock_pc.refund_booking.assert_not_awaited()

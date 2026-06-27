@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass, field
 from functools import lru_cache
 from urllib.parse import quote, unquote
@@ -112,8 +113,7 @@ async def can_read_or_manage_booking(
     has_read = BookingScope.READ in current_user.scopes
     has_manage = BookingScope.MANAGE in current_user.scopes
     has_admin = (
-        BookingScope.ADMIN in current_user.scopes
-        or BookingScope.ADMIN_READ in current_user.scopes
+        BookingScope.ADMIN in current_user.scopes or BookingScope.ADMIN_READ in current_user.scopes
     )
     if not (has_read or has_manage or has_admin):
         raise HTTPException(
@@ -160,9 +160,7 @@ class PropertiesClient:
 
     async def get_property(self, property_id: UUID, user: CurrentUser) -> dict | None:
         """Returns property dict or None if 404. Raises HTTPException on other errors."""
-        resp = await self._client.get(
-            f"/properties/{property_id}", headers=self._headers(user)
-        )
+        resp = await self._client.get(f"/properties/{property_id}", headers=self._headers(user))
         if resp.status_code == 404:
             return None
         if resp.status_code >= 400:
@@ -172,9 +170,7 @@ class PropertiesClient:
             )
         return resp.json()
 
-    async def get_unavailabilities(
-        self, property_id: UUID, user: CurrentUser
-    ) -> list[dict]:
+    async def get_unavailabilities(self, property_id: UUID, user: CurrentUser) -> list[dict]:
         """Returns list of unavailability windows for the property."""
         resp = await self._client.get(
             f"/properties/{property_id}/unavailabilities", headers=self._headers(user)
@@ -193,7 +189,7 @@ class PropertiesClient:
         try:
             params = [("ids", str(vid)) for vid in property_ids]
             resp = await self._client.get(
-                "/properties/bulk", params=params, headers=self._headers(user)
+                "/properties/bulk", params=params, headers=self._headers(user)  # type: ignore
             )
             if resp.status_code >= 400 or not resp.content:
                 return []
@@ -246,9 +242,7 @@ class UsersClient:
             return []
         try:
             params = [("ids", str(uid)) for uid in user_ids]
-            resp = await self._client.get(
-                "/users/bulk", params=params, headers=self._headers(user)
-            )
+            resp = await self._client.get("/users/bulk", params=params, headers=self._headers(user))  # type: ignore
             if resp.status_code >= 400 or not resp.content:
                 return []
             return resp.json()
@@ -297,19 +291,63 @@ class PaymentsClient:
             "X-User-Scopes": " ".join(user.scopes),
         }
 
-    async def refund_booking(self, booking_id: UUID, caller: CurrentUser) -> bool:
+    async def refund_booking(
+        self, booking_id: UUID, caller: CurrentUser, amount: float | None = None
+    ) -> bool:
         """
         Request a refund for a booking's payment.
-        Returns True on success, False on any error (silently degraded).
+
+        ``amount`` (in major currency units) issues a partial refund; ``None``
+        issues a full refund.
+        Retries up to 3 times on network errors or 5xx responses (exponential backoff).
+        Logs a warning on each retry and an error if all attempts fail.
+        Returns True on success, False after exhausting retries (never raises).
         """
-        try:
-            resp = await self._client.post(
-                f"/payments/booking/{booking_id}/refund",
-                headers=self._headers(caller),
-            )
-            return resp.status_code < 400
-        except (httpx.RequestError, Exception):
-            return False
+        json_body = None if amount is None else {"amount": f"{amount:.2f}"}
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                resp = await self._client.post(
+                    f"/payments/booking/{booking_id}/refund",
+                    headers=self._headers(caller),
+                    json=json_body,
+                )
+                if resp.status_code < 400:
+                    return True
+                # 4xx — no point retrying (not found, forbidden, bad state)
+                if resp.status_code < 500:
+                    logger.error(
+                        "Refund rejected by payments-ms for booking {} | status={} body={}",
+                        booking_id,
+                        resp.status_code,
+                        resp.text[:200],
+                    )
+                    return False
+                # 5xx — retryable
+                logger.warning(
+                    "Refund attempt {}/{} failed for booking {} | status={}",
+                    attempt,
+                    max_attempts,
+                    booking_id,
+                    resp.status_code,
+                )
+            except httpx.RequestError as exc:
+                logger.warning(
+                    "Refund attempt {}/{} failed for booking {} | network error: {}",
+                    attempt,
+                    max_attempts,
+                    booking_id,
+                    exc,
+                )
+            if attempt < max_attempts:
+                await asyncio.sleep(2 ** (attempt - 1))  # 1s, 2s
+
+        logger.error(
+            "Refund FAILED after {} attempts for booking {} — manual refund required",
+            max_attempts,
+            booking_id,
+        )
+        return False
 
 
 _payments_client = PaymentsClient()
@@ -365,10 +403,20 @@ class NotificationsClient:
         }
 
     async def send(
-        self, *, to: str, notification_type: str, data: dict | None = None
+        self,
+        *,
+        to: str,
+        notification_type: str,
+        data: dict | None = None,
+        locale: str | None = None,
     ) -> None:
         try:
-            logger.debug("Sending notification from bookings-ms | type={} to={} data={}", notification_type, to, data)
+            logger.debug(
+                "Sending notification from bookings-ms | type={} to={} data={}",
+                notification_type,
+                to,
+                data,
+            )
             resp = await self._client.post(
                 "/notifications/dispatch",
                 json={
@@ -376,20 +424,30 @@ class NotificationsClient:
                     "to": to,
                     "data": data or {},
                     "triggered_by": "bookings-ms",
+                    "locale": locale,
                 },
                 headers=self._headers(),
             )
             if resp.status_code >= 400:
                 logger.error(
                     "Notification dispatch rejected | type={} to={} status={} body={}",
-                    notification_type, to, resp.status_code, resp.text[:500],
+                    notification_type,
+                    to,
+                    resp.status_code,
+                    resp.text[:500],
                 )
             else:
-                logger.debug("Successfully sent notification from bookings-ms | type={} to={}", notification_type, to)
+                logger.debug(
+                    "Successfully sent notification from bookings-ms | type={} to={}",
+                    notification_type,
+                    to,
+                )
         except Exception as exc:
             logger.opt(exception=True).error(
                 "Failed to send notification from bookings-ms | type={} to={} error={!r}",
-                notification_type, to, exc,
+                notification_type,
+                to,
+                exc,
             )
 
 

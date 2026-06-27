@@ -5,15 +5,22 @@ description = "Bookings microservice for the BrighterProject platform"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "aerich>=0.8.2",
     "fastapi[standard]>=0.112.4",
     "httpx>=0.28",
     "loguru>=0.7.3",
     "ms-core",
+    "opentelemetry-api>=1.42.1",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.42.1",
+    "opentelemetry-exporter-prometheus>=0.63b1",
+    "opentelemetry-instrumentation-asyncpg>=0.46b0",
+    "opentelemetry-instrumentation-fastapi>=0.46b0",
+    "opentelemetry-instrumentation-httpx>=0.46b0",
+    "opentelemetry-sdk>=1.42.1",
+    "prometheus-client>=0.25.0",
     "pydantic>=2.11.7",
     "redis>=7.2.0",
     "slowapi>=0.1.9",
-    "tortoise-orm[asyncpg]>=0.21.7",
+    "tortoise-orm[asyncpg]>=1.1.7",
 ]
 
 [dependency-groups]
@@ -28,8 +35,9 @@ dev = [
 check = "bash scripts/check.sh"
 
 [tool.ruff]
-line-length = 88
+line-length = 100
 target-version = "py313"
+exclude = ["migrations"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
@@ -49,7 +57,5 @@ reportInvalidTypeForm = "none"
 [tool.uv.sources]
 ms-core = { url = "https://github.com/HexChap/MSCore/archive/refs/heads/master.zip" }
 
-[tool.aerich]
-tortoise_orm = "main.tortoise_conf"
-location = "./migrations"
-src_folder = "./."
+[tool.tortoise]
+tortoise_orm = "main.TORTOISE_ORM"

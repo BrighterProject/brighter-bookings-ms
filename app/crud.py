@@ -9,7 +9,12 @@ from ms_core import CRUD
 from tortoise.transactions import in_transaction
 
 from app.models import Booking, BookingStatus
-from app.schemas import BookingFilters, BookingResponse, BookingSlot, BookingStatusUpdate
+from app.schemas import (
+    BookingFilters,
+    BookingResponse,
+    BookingSlot,
+    BookingStatusUpdate,
+)
 
 
 def _overlaps_unavailabilities(
@@ -62,6 +67,8 @@ class BookingCRUD(CRUD[Booking, BookingResponse]):  # type: ignore
         special_requests: str | None,
         unavailabilities: list[dict],
         total_price: Decimal | None = None,
+        gap_adjustment_pct: Decimal = Decimal("0"),
+        payment_method: str | None = None,
     ) -> BookingResponse:
         """
         Persist a new booking after validating:
@@ -84,12 +91,16 @@ class BookingCRUD(CRUD[Booking, BookingResponse]):  # type: ignore
 
         # Atomic check-then-insert: SELECT FOR UPDATE prevents double-booking
         async with in_transaction():
-            if await Booking.filter(
-                property_id=property_id,
-                status__in=[BookingStatus.PENDING, BookingStatus.CONFIRMED],
-                start_date__lt=end_date,
-                end_date__gt=start_date,
-            ).select_for_update().exists():
+            if (
+                await Booking.filter(
+                    property_id=property_id,
+                    status__in=[BookingStatus.PENDING, BookingStatus.CONFIRMED],
+                    start_date__lt=end_date,
+                    end_date__gt=start_date,
+                )
+                .select_for_update()
+                .exists()
+            ):
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="Booking conflicts with an existing booking for this property",
@@ -110,6 +121,8 @@ class BookingCRUD(CRUD[Booking, BookingResponse]):  # type: ignore
                 guest_phone=guest_phone,
                 guest_country=guest_country,
                 special_requests=special_requests,
+                gap_adjustment_pct=gap_adjustment_pct,
+                payment_method=payment_method,
             )
 
         return BookingResponse.model_validate(inst, from_attributes=True)
@@ -123,9 +136,7 @@ class BookingCRUD(CRUD[Booking, BookingResponse]):  # type: ignore
         if user_id is not None:
             inst = await Booking.get_or_none(id=booking_id, user_id=user_id)
         elif property_owner_id is not None:
-            inst = await Booking.get_or_none(
-                id=booking_id, property_owner_id=property_owner_id
-            )
+            inst = await Booking.get_or_none(id=booking_id, property_owner_id=property_owner_id)
         else:
             inst = await Booking.get_or_none(id=booking_id)
 
@@ -154,9 +165,7 @@ class BookingCRUD(CRUD[Booking, BookingResponse]):  # type: ignore
         qs = qs.offset(offset).limit(filters.page_size)
 
         bookings = await qs
-        return [
-            BookingResponse.model_validate(b, from_attributes=True) for b in bookings
-        ]
+        return [BookingResponse.model_validate(b, from_attributes=True) for b in bookings]
 
     async def update_booking_status(
         self,
