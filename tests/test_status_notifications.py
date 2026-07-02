@@ -69,7 +69,14 @@ class TestCancellationNotification:
         data = kwargs["data"]
         assert "юни" in data["start_date"]
         assert "юни" in data["end_date"]
-        assert "юни" in data["cancelled_date"]
+        # cancelled_date is date.today(); assert against the current Bulgarian
+        # month so the test is not pinned to the month it was written in.
+        bg_months = [
+            "",
+            "януари", "февруари", "март", "април", "май", "юни",
+            "юли", "август", "септември", "октомври", "ноември", "декември",
+        ]
+        assert bg_months[date.today().month] in data["cancelled_date"]
         assert kwargs["locale"] == "bg"
 
     def test_dates_english_by_default(self):
