@@ -171,9 +171,16 @@ class PropertiesClient:
         return resp.json()
 
     async def get_unavailabilities(self, property_id: UUID, user: CurrentUser) -> list[dict]:
-        """Returns list of unavailability windows for the property."""
+        """Returns unavailability windows, including days that have no price set.
+
+        ``include_price_gaps`` makes properties-ms synthesize blocks for unpriced
+        days so a booking on a day with no price is rejected as overlapping an
+        unavailability window.
+        """
         resp = await self._client.get(
-            f"/properties/{property_id}/unavailabilities", headers=self._headers(user)
+            f"/properties/{property_id}/unavailabilities",
+            params={"include_price_gaps": "true"},
+            headers=self._headers(user),
         )
         if resp.status_code >= 400:
             raise HTTPException(
