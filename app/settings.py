@@ -10,3 +10,8 @@ REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 # Fernet key (base64) for encrypting GuestIdentity.document_number / pin_egn at rest.
 # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 booking_field_encryption_key = os.environ.get("BOOKING_FIELD_ENCRYPTION_KEY", "")
+
+# Separate signing secret for the guest check-in link JWT — never shares trust
+# with users-ms's session auth. Own claims: {booking_id, exp}.
+checkin_token_secret = os.environ.get("CHECKIN_TOKEN_SECRET", "")
+checkin_token_grace_days = int(os.environ.get("CHECKIN_TOKEN_GRACE_DAYS", "1"))
