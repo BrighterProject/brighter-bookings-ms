@@ -1,12 +1,14 @@
 import asyncio
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from loguru import logger
 
+from app import settings
 from app.cache import get_slots_cache, invalidate_slots_cache, set_slots_cache
+from app.checkin_token import generate_checkin_token
 from app.crud import booking_crud
 from app.deps import (
     CurrentUser,
@@ -35,6 +37,7 @@ from app.schemas import (
     BookingSlot,
     BookingStatus,
     BookingStatusUpdate,
+    CheckinLinkResponse,
 )
 from app.scopes import BookingScope
 
@@ -530,6 +533,30 @@ async def get_booking(
 
     results = await _enrich([booking], current_user, properties_client, users_client)
     return results[0]
+
+
+@router.get("/{booking_id}/checkin-link", response_model=CheckinLinkResponse)
+@limiter.limit("30/minute")
+async def get_checkin_link(
+    request: Request,
+    booking_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> CheckinLinkResponse:
+    """Return the booking owner's (or an admin's) shareable check-in token on demand."""
+    booking = await booking_crud.get_booking(booking_id)
+    if booking is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
+    if booking.user_id != current_user.id and not current_user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    if booking.status != BookingStatus.CONFIRMED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Booking is not confirmed"
+        )
+    expires_at = booking.end_date + timedelta(days=settings.checkin_token_grace_days)
+    if date.today() > expires_at:
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Check-in link has expired")
+    token = generate_checkin_token(booking.id, end_date=booking.end_date)
+    return CheckinLinkResponse(token=token, expires_at=expires_at)
 
 
 # Tiered guest-cancellation refund schedule (Booking.com-style), keyed by the
