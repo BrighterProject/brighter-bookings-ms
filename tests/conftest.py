@@ -5,10 +5,19 @@ No imports needed in test files — pytest discovers this by convention.
 
 from __future__ import annotations
 
+import base64
 import os
 
 # Disable slowapi rate limiting in tests — must be set before app.limiter is imported.
 os.environ["SLOWAPI_NO_LIMITS"] = "true"
+
+# Deterministic Fernet key + check-in token secret for tests — must be set
+# before any `app.*` import so settings picks them up at module load.
+os.environ.setdefault(
+    "BOOKING_FIELD_ENCRYPTION_KEY",
+    base64.urlsafe_b64encode(b"0" * 32).decode(),
+)
+os.environ.setdefault("CHECKIN_TOKEN_SECRET", "test-checkin-token-secret-not-for-prod")
 
 from unittest.mock import AsyncMock, MagicMock, patch
 

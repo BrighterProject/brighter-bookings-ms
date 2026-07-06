@@ -5,6 +5,7 @@ description = "Bookings microservice for the BrighterProject platform"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "cryptography>=49.0.0",
     "fastapi[standard]>=0.112.4",
     "httpx>=0.28",
     "loguru>=0.7.3",
@@ -18,6 +19,7 @@ dependencies = [
     "opentelemetry-sdk>=1.42.1",
     "prometheus-client>=0.25.0",
     "pydantic>=2.11.7",
+    "python-jose[cryptography]>=3.5.0",
     "redis>=7.2.0",
     "slowapi>=0.1.9",
     "tortoise-orm[asyncpg]>=1.1.7",

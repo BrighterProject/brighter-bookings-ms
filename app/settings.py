@@ -6,3 +6,7 @@ properties_ms_url = os.environ.get("PROPERTIES_MS_URL", "http://localhost:8001")
 payments_ms_url = os.environ.get("PAYMENTS_MS_URL", "http://localhost:8003")
 notifications_ms_url = os.environ.get("NOTIFICATIONS_MS_URL", "http://localhost:8004")
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+
+# Fernet key (base64) for encrypting GuestIdentity.document_number / pin_egn at rest.
+# Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+booking_field_encryption_key = os.environ.get("BOOKING_FIELD_ENCRYPTION_KEY", "")
