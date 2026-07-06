@@ -1,4 +1,5 @@
 import asyncio
+import hmac
 from dataclasses import dataclass, field
 from functools import lru_cache
 from urllib.parse import quote, unquote
@@ -507,7 +508,8 @@ can_admin_write_guest_identity = require_scopes(BookingScope.ADMIN_WRITE)
 async def verify_internal_cron_secret(authorization: str = Header(default="")) -> None:
     """Guard /internal/* endpoints with the shared cron secret (defense in depth)."""
     expected = f"Bearer {settings.internal_cron_secret}"
-    if not settings.internal_cron_secret or authorization != expected:
+    # Constant-time comparison — never leak the secret via response timing.
+    if not settings.internal_cron_secret or not hmac.compare_digest(authorization, expected):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid internal cron credentials",
