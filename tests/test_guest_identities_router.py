@@ -68,7 +68,7 @@ def _guest_payload(**overrides):
         document_type="id_card",
         document_number="123456789",
         document_issuing_country="BG",
-        pin_egn="8001010034",
+        pin_egn="8001010008",  # valid EGN, dob 1980-01-01, encodes MALE
     )
     return {**base, **overrides}
 

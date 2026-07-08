@@ -10,7 +10,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from pydantic_core import InitErrorDetails
 from pydantic_core import ValidationError as CoreValidationError
 
-from app.egn import extract_dob_and_gender, is_valid_egn_checksum
+from app.egn import (
+    extract_dob_and_gender,
+    is_valid_egn_checksum,
+    is_valid_lnch_checksum,
+)
 from app.models import DocumentType, Gender
 
 # Never let a validation error echo raw government-ID values back to a caller.
@@ -165,19 +169,33 @@ class GuestIdentityCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_bg_requirements_and_egn(self) -> GuestIdentityCreate:
+        # Middle name (бащино име) is a naming convention of Bulgarian citizens.
         if self.citizenship == "BG":
             if not self.middle_name or len(self.middle_name.strip()) < 2:
                 raise ValueError("middle_name is required for Bulgarian citizens")
-            if not self.pin_egn:
-                raise ValueError("pin_egn is required for Bulgarian citizens")
+        # A Bulgarian-issued document carries a personal number: EGN for citizens
+        # (and permanently-resident foreigners), or LNCh for long-term-resident
+        # foreigners. Tie the requirement to the issuing country, not citizenship.
+        if self.document_issuing_country == "BG" and not self.pin_egn:
+            raise ValueError("pin_egn is required for documents issued in Bulgaria")
         if self.pin_egn:
-            if not is_valid_egn_checksum(self.pin_egn):
-                raise ValueError("Invalid EGN checksum or format")
-            egn_dob, egn_gender = extract_dob_and_gender(self.pin_egn)
-            if egn_dob != self.date_of_birth:
-                raise ValueError("date_of_birth does not match the birth date encoded in pin_egn")
-            if egn_gender != self.gender:
-                raise ValueError("gender does not match the gender encoded in pin_egn")
+            # Prefer an EGN reading: if it is a valid EGN encoding a real date,
+            # cross-check the encoded DOB/gender against the submission. An LNCh
+            # encodes neither, so a valid-LNCh-only value skips the cross-check.
+            encoded: tuple[date, Gender] | None = None
+            if is_valid_egn_checksum(self.pin_egn):
+                try:
+                    encoded = extract_dob_and_gender(self.pin_egn)
+                except ValueError:
+                    encoded = None
+            if encoded is not None:
+                egn_dob, egn_gender = encoded
+                if egn_dob != self.date_of_birth:
+                    raise ValueError("date_of_birth does not match the birth date encoded in pin_egn")
+                if egn_gender != self.gender:
+                    raise ValueError("gender does not match the gender encoded in pin_egn")
+            elif not is_valid_lnch_checksum(self.pin_egn):
+                raise ValueError("Invalid EGN/LNCh checksum or format")
         return self
 
     def __repr__(self) -> str:

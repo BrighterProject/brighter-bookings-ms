@@ -76,7 +76,7 @@ def _guest_payload(**overrides):
         document_type="id_card",
         document_number="123456789",
         document_issuing_country="BG",
-        pin_egn="8001010034",
+        pin_egn="8001010008",
     )
     return {**base, **overrides}
 
@@ -117,7 +117,7 @@ async def test_post_guest_rejects_when_roster_full(booking):
         await client.post(
             "/checkin/dummy-token/guests",
             json=_guest_payload(
-                pin_egn="9506150023",
+                pin_egn="9506150018",
                 gender="female",
                 date_of_birth="1995-06-15",
                 first_name="Maria",
