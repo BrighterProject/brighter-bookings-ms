@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Request
 
 from app import settings
-from app.checkin_token import generate_checkin_token
+from app.checkin_dispatch import checkin_dispatch_cutoff, send_checkin_link, today_in_sofia
 from app.deps import (
     NotificationsClient,
     UsersClient,
@@ -24,7 +23,6 @@ router = APIRouter(
     dependencies=[Depends(verify_internal_cron_secret)],
 )
 
-_SOFIA_TZ = ZoneInfo("Europe/Sofia")
 _BATCH_SIZE = 100
 
 # Fields nulled by the purge job — every GuestIdentity field except names,
@@ -40,20 +38,13 @@ _PURGE_FIELDS: tuple[str, ...] = (
 )
 
 
-def _today_in_sofia() -> date:
-    # Booking.start_date/end_date are bare dates; the CronJob pod runs in UTC.
-    # Resolving "today" to Bulgarian local time before comparing avoids the
-    # dispatch/purge windows drifting by a day around UTC midnight.
-    return datetime.now(_SOFIA_TZ).date()
-
-
 @router.post("/dispatch")
 async def dispatch_checkin_links(
     request: Request,
     users_client: UsersClient = Depends(get_users_client),
     notifications_client: NotificationsClient = Depends(get_notifications_client),
 ) -> dict[str, Any]:
-    cutoff = _today_in_sofia() + timedelta(days=settings.checkin_dispatch_lead_days)
+    cutoff = checkin_dispatch_cutoff()
     caller = _get_system_admin()
     dispatched = 0
 
@@ -71,17 +62,7 @@ async def dispatch_checkin_links(
             break
 
         for booking in due:
-            token = generate_checkin_token(booking.id, end_date=booking.end_date)
-            recipients = await users_client.get_by_ids({booking.user_id}, caller)
-            email = recipients[0]["email"] if recipients else None
-            if email:
-                await notifications_client.send(
-                    to=email,
-                    notification_type="checkin_link",
-                    data={"token": token, "num_guests": booking.num_guests},
-                )
-            booking.checkin_link_sent_at = datetime.now(UTC)
-            await booking.save(update_fields=["checkin_link_sent_at"])
+            await send_checkin_link(booking, users_client, notifications_client, caller)
             dispatched += 1
 
         if len(due) < _BATCH_SIZE:
@@ -92,7 +73,7 @@ async def dispatch_checkin_links(
 
 @router.post("/purge")
 async def purge_guest_identities(request: Request) -> dict[str, Any]:
-    cutoff = _today_in_sofia() - timedelta(days=settings.booking_purge_window_days)
+    cutoff = today_in_sofia() - timedelta(days=settings.booking_purge_window_days)
     purged_bookings = 0
 
     while True:

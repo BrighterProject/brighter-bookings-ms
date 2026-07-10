@@ -11,7 +11,7 @@ from app.checkin_token import generate_checkin_token
 from app.deps import get_booking_from_checkin_token, get_properties_client
 from app.exception_handlers import sanitized_validation_error_handler
 from app.limiter import limiter
-from app.models import Booking
+from app.models import Booking, BookingStatus
 from app.routers.checkin import router
 
 from .factories import CUSTOMER_ID, PROPERTY_ID, PROPERTY_OWNER_ID
@@ -157,6 +157,7 @@ async def test_validation_error_never_echoes_pin_egn_through_real_token_flow():
         price_per_night="50.00",
         total_price="150.00",
         num_guests=2,
+        status=BookingStatus.CONFIRMED,
     )
     token = generate_checkin_token(booking_obj.id, end_date=booking_obj.end_date)
     async with _http(_build_app(booking=None)) as client:

@@ -11,7 +11,7 @@ from app.deps import (
     get_booking_from_checkin_token,
     verify_internal_cron_secret,
 )
-from app.models import Booking
+from app.models import Booking, BookingStatus
 
 from .factories import (
     CUSTOMER_ID,
@@ -42,6 +42,7 @@ async def _make_booking() -> Booking:
         end_date=END_DATE,
         price_per_night="50.00",
         total_price="100.00",
+        status=BookingStatus.CONFIRMED,
     )
 
 
@@ -50,6 +51,15 @@ async def test_get_booking_from_checkin_token_returns_booking():
     token = generate_checkin_token(booking.id, end_date=date.today() + timedelta(days=5))
     resolved = await get_booking_from_checkin_token(token)
     assert resolved.id == booking.id
+
+
+async def test_get_booking_from_checkin_token_rejects_cancelled_booking():
+    booking = await _make_booking()
+    await Booking.filter(id=booking.id).update(status=BookingStatus.CANCELLED)
+    token = generate_checkin_token(booking.id, end_date=date.today() + timedelta(days=5))
+    with pytest.raises(HTTPException) as exc_info:
+        await get_booking_from_checkin_token(token)
+    assert exc_info.value.status_code == 403
 
 
 async def test_get_booking_from_checkin_token_rejects_garbage_token():

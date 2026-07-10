@@ -8,6 +8,7 @@ from loguru import logger
 
 from app import settings
 from app.cache import get_slots_cache, invalidate_slots_cache, set_slots_cache
+from app.checkin_dispatch import maybe_send_checkin_link
 from app.checkin_token import generate_checkin_token
 from app.crud import booking_crud
 from app.deps import (
@@ -688,6 +689,14 @@ async def update_booking_status(
                 properties_client,
                 refund_amount=refund_amount,
             )
+        )
+
+    # Short-notice bookings can't wait for the daily 08:00 sweep: fire the
+    # check-in link now if confirmation lands inside the dispatch lead window.
+    # No-op (and cron-safe) when outside the window or already sent.
+    if payload.status == BookingStatus.CONFIRMED:
+        asyncio.create_task(
+            maybe_send_checkin_link(booking_id, users_client, notifications_client)
         )
 
     return updated

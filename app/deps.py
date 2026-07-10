@@ -12,7 +12,7 @@ from loguru import logger
 
 from app import settings
 from app.checkin_token import CheckinTokenError, verify_checkin_token
-from app.models import Booking
+from app.models import Booking, BookingStatus
 from app.scopes import BOOKING_SCOPE_DESCRIPTIONS, BookingScope
 
 # ---------------------------------------------------------------------------
@@ -478,6 +478,17 @@ async def get_booking_from_checkin_token(token: str) -> Booking:
     booking = await Booking.get_or_none(id=booking_id)
     if booking is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
+    # The token is a stateless JWT valid until end_date + grace, so a booking
+    # cancelled (or otherwise closed) after the link was emailed still presents a
+    # cryptographically valid token. Gate on live booking state so a revoked
+    # booking can neither view nor submit its guest roster. Use 403 (not 409):
+    # the guest-form UI already maps 409 on POST /guests to "roster full", so a
+    # distinct code keeps the revocation message from being mistaken for that.
+    if booking.status != BookingStatus.CONFIRMED:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This booking is no longer active for check-in",
+        )
     return booking
 
 
