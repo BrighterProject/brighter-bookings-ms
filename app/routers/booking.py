@@ -1,6 +1,7 @@
 import asyncio
 from datetime import date
 from decimal import Decimal
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -368,6 +369,7 @@ async def get_property_slots(
 async def list_bookings(
     request: Request,
     filters: BookingFilters = Depends(),
+    view: Literal["guest", "owner"] | None = Query(default=None),
     current_user: CurrentUser = Depends(can_read_or_manage_booking),
     properties_client: PropertiesClient = Depends(get_properties_client),
     users_client: UsersClient = Depends(get_users_client),
@@ -379,6 +381,10 @@ async def list_bookings(
 
     if is_admin:
         bookings = await booking_crud.list_bookings(filters=filters)
+    elif view == "guest":
+        # Property owner explicitly asking for bookings THEY made as a guest,
+        # rather than bookings made on their own properties.
+        bookings = await booking_crud.list_bookings(filters=filters, user_id=current_user.id)
     elif is_manager:
         # Property owners see bookings for their properties regardless of also having
         # bookings:read (which DEFAULT_OWNER_SCOPES includes for customer use)
