@@ -425,6 +425,20 @@ async def create_booking(
             detail=(f"Property is not available for booking (status: {property.get('status')})"),
         )
 
+    # 1a. Advance-booking window: check-in may be at most N days ahead.
+    booking_window_days = property.get(
+        "booking_window_days", settings.BOOKING_WINDOW_DAYS
+    )
+    max_start_date = date.today() + timedelta(days=booking_window_days)
+    if payload.start_date > max_start_date:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Check-in date is too far in advance. Bookings can be made at "
+                f"most {booking_window_days} days ahead."
+            ),
+        )
+
     # 1b. Min-nights + gap filler validation
     num_nights = (payload.end_date - payload.start_date).days
     min_nights = property.get("min_nights", 1)
