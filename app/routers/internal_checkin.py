@@ -88,13 +88,17 @@ async def purge_guest_identities(request: Request) -> dict[str, Any]:
         if not due:
             break
 
-        for booking in due:
-            await GuestIdentity.filter(booking_id=booking.id).update(
-                **{field: None for field in _PURGE_FIELDS}
-            )
-            booking.guest_data_purged_at = datetime.now(UTC)
-            await booking.save(update_fields=["guest_data_purged_at"])
-            purged_bookings += 1
+        booking_ids = [booking.id for booking in due]
+
+        await GuestIdentity.filter(booking_id__in=booking_ids).update(
+            **{field: None for field in _PURGE_FIELDS}
+        )
+
+        await Booking.filter(id__in=booking_ids).update(
+            guest_data_purged_at=datetime.now(UTC)
+        )
+
+        purged_bookings += len(due)
 
         if len(due) < _BATCH_SIZE:
             break
