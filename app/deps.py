@@ -1,4 +1,5 @@
 import asyncio
+import hmac
 from dataclasses import dataclass, field
 from functools import lru_cache
 from urllib.parse import quote, unquote
@@ -10,6 +11,8 @@ from fastapi.security import OAuth2PasswordBearer
 from loguru import logger
 
 from app import settings
+from app.checkin_token import CheckinTokenError, verify_checkin_token
+from app.models import Booking, BookingStatus
 from app.scopes import BOOKING_SCOPE_DESCRIPTIONS, BookingScope
 
 # ---------------------------------------------------------------------------
@@ -456,3 +459,69 @@ _notifications_client = NotificationsClient()
 
 def get_notifications_client() -> NotificationsClient:
     return _notifications_client
+
+
+# ---------------------------------------------------------------------------
+# Guest check-in flow dependencies (BTR-15)
+# ---------------------------------------------------------------------------
+
+
+async def get_booking_from_checkin_token(token: str) -> Booking:
+    """Resolve a booking from a public, unauthenticated check-in token."""
+    try:
+        booking_id = verify_checkin_token(token)
+    except CheckinTokenError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired check-in link",
+        ) from None
+    booking = await Booking.get_or_none(id=booking_id)
+    if booking is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
+    # The token is a stateless JWT valid until end_date + grace, so a booking
+    # cancelled (or otherwise closed) after the link was emailed still presents a
+    # cryptographically valid token. Gate on live booking state so a revoked
+    # booking can neither view nor submit its guest roster. Use 403 (not 409):
+    # the guest-form UI already maps 409 on POST /guests to "roster full", so a
+    # distinct code keeps the revocation message from being mistaken for that.
+    if booking.status != BookingStatus.CONFIRMED:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This booking is no longer active for check-in",
+        )
+    return booking
+
+
+async def can_view_guest_identities(
+    booking_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> Booking:
+    """Allow the booking's host (property owner) or an admin to view its roster."""
+    booking = await Booking.get_or_none(id=booking_id)
+    if booking is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
+    is_host = (
+        BookingScope.MANAGE in current_user.scopes
+        and booking.property_owner_id == current_user.id
+    )
+    is_admin = current_user.is_admin or BookingScope.ADMIN_READ in current_user.scopes
+    if not (is_host or is_admin):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to view guest identities for this booking",
+        )
+    return booking
+
+
+can_admin_write_guest_identity = require_scopes(BookingScope.ADMIN_WRITE)
+
+
+async def verify_internal_cron_secret(authorization: str = Header(default="")) -> None:
+    """Guard /internal/* endpoints with the shared cron secret (defense in depth)."""
+    expected = f"Bearer {settings.internal_cron_secret}"
+    # Constant-time comparison — never leak the secret via response timing.
+    if not settings.internal_cron_secret or not hmac.compare_digest(authorization, expected):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid internal cron credentials",
+        )
