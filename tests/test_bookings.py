@@ -151,6 +151,45 @@ class TestCreateBooking:
         assert resp.status_code == 422
         assert "not available" in resp.json()["detail"]
 
+    def test_start_date_beyond_window_returns_422(self, client_factory):
+        client = client_factory(make_customer(), properties_client=self._mock_vc())
+        far = date.today() + timedelta(days=200)  # default window is 180 days
+        payload = booking_create_payload(
+            start_date=far.isoformat(),
+            end_date=(far + timedelta(days=2)).isoformat(),
+        )
+        resp = client.post("/bookings", json=payload)
+        assert resp.status_code == 422
+        assert "advance" in resp.json()["detail"].lower()
+
+    def test_custom_property_window_enforced(self, client_factory):
+        mock_vc = MagicMock()
+        mock_vc.get_property = AsyncMock(
+            return_value=property_dict(booking_window_days=30)
+        )
+        mock_vc.get_unavailabilities = AsyncMock(return_value=[])
+        client = client_factory(make_customer(), properties_client=mock_vc)
+        d = date.today() + timedelta(days=45)  # beyond the property's 30-day window
+        payload = booking_create_payload(
+            start_date=d.isoformat(),
+            end_date=(d + timedelta(days=2)).isoformat(),
+        )
+        resp = client.post("/bookings", json=payload)
+        assert resp.status_code == 422
+        assert "advance" in resp.json()["detail"].lower()
+
+    def test_within_window_allowed(self, client_factory):
+        client = client_factory(make_customer(), properties_client=self._mock_vc())
+        d = date.today() + timedelta(days=30)  # within the default 180-day window
+        payload = booking_create_payload(
+            start_date=d.isoformat(),
+            end_date=(d + timedelta(days=2)).isoformat(),
+        )
+        with patch(CRUD_PATH) as mock_crud:
+            mock_crud.create_booking = AsyncMock(return_value=booking_response())
+            resp = client.post("/bookings", json=payload)
+        assert resp.status_code == 201
+
     def test_invalid_payload_returns_422(self, client_factory):
         client = client_factory(make_customer(), properties_client=self._mock_vc())
         resp = client.post("/bookings", json={"property_id": str(PROPERTY_ID)})

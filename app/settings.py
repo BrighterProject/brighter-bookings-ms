@@ -27,3 +27,6 @@ checkin_dispatch_lead_days = int(os.environ.get("CHECKIN_DISPATCH_LEAD_DAYS", "2
 
 # Days past end_date before GuestIdentity sensitive fields are purged.
 booking_purge_window_days = int(os.environ.get("BOOKING_PURGE_WINDOW_DAYS", "14"))
+# Fallback max advance-booking window (days) when a property doesn't report one.
+# Kept in sync with properties-ms; properties-ms is the source of truth per property.
+BOOKING_WINDOW_DAYS = int(os.environ.get("BOOKING_WINDOW_DAYS", "180"))
