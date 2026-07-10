@@ -37,21 +37,34 @@ async def send_checkin_link(
 ) -> None:
     """Generate a check-in token, email it to the guest, and mark the booking sent.
 
-    Idempotency is the caller's responsibility: the daily cron filters on
-    ``checkin_link_sent_at IS NULL`` and the event path guards via
-    :func:`maybe_send_checkin_link` before calling here.
+    Claims the booking atomically (``UPDATE ... WHERE checkin_link_sent_at IS
+    NULL``) before sending. The immediate post-confirm dispatch
+    (:func:`maybe_send_checkin_link`, fired via ``asyncio.create_task`` and not
+    awaited by the request handler) and the daily cron sweep both read-then-act
+    on the same ``IS NULL`` marker; a plain "send, then mark sent" ordering
+    lets both win the race and double-send. Claiming first makes only one
+    caller proceed; if the send fails the claim is released so a later sweep
+    retries.
     """
+    claimed = await Booking.filter(
+        id=booking.id, checkin_link_sent_at__isnull=True
+    ).update(checkin_link_sent_at=datetime.now(UTC))
+    if not claimed:
+        return
+
     token = generate_checkin_token(booking.id, end_date=booking.end_date)
     recipients = await users_client.get_by_ids({booking.user_id}, caller)
     email = recipients[0]["email"] if recipients else None
     if email:
-        await notifications_client.send(
-            to=email,
-            notification_type="checkin_link",
-            data={"token": token, "num_guests": booking.num_guests},
-        )
-    booking.checkin_link_sent_at = datetime.now(UTC)
-    await booking.save(update_fields=["checkin_link_sent_at"])
+        try:
+            await notifications_client.send(
+                to=email,
+                notification_type="checkin_link",
+                data={"token": token, "num_guests": booking.num_guests},
+            )
+        except Exception:
+            await Booking.filter(id=booking.id).update(checkin_link_sent_at=None)
+            raise
 
 
 async def maybe_send_checkin_link(
