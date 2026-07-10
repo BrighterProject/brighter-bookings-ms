@@ -4,22 +4,26 @@ import base64
 import binascii
 from functools import lru_cache
 
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 from loguru import logger
 from tortoise.fields import CharField
 
 from app import settings
 
-# Fernet tokens are URL-safe base64 whose first decoded byte is the version
-# marker 0x80. We sniff for this before attempting decryption so that plaintext
+# Fernet tokens are URL-safe base64 that always starts "gAAAA" (version byte
+# 0x80 plus a timestamp whose high-order bytes stay zero until year 2106) and
+# is at least 100 chars long (the minimum-length token, for an empty
+# plaintext). We sniff for this before attempting decryption so that plaintext
 # values Tortoise feeds through `to_python_value` during model instantiation
 # (`_set_kwargs` coerces every kwarg via `to_python_value`) are passed straight
-# through, while genuine ciphertext read back from the DB is decrypted — and a
-# tampered token (whose 0x80 prefix survives tail corruption) still hard-fails.
+# through, while genuine ciphertext read back from the DB is decrypted.
 _FERNET_VERSION = 0x80
+_FERNET_MIN_TOKEN_LENGTH = 100
 
 
 def _looks_like_fernet_token(value: str) -> bool:
+    if not value.startswith("gAAAA") or len(value) < _FERNET_MIN_TOKEN_LENGTH:
+        return False
     try:
         raw = base64.urlsafe_b64decode(value.encode())
     except (binascii.Error, ValueError):
@@ -28,14 +32,17 @@ def _looks_like_fernet_token(value: str) -> bool:
 
 
 @lru_cache(maxsize=1)
-def _get_fernet() -> Fernet:
-    key = settings.booking_field_encryption_key
-    if not key:
+def _get_fernet() -> MultiFernet:
+    keys = settings.booking_field_encryption_key
+    if not keys:
         raise RuntimeError(
             "BOOKING_FIELD_ENCRYPTION_KEY is not set — required to encrypt "
             "guest identity fields (document_number, pin_egn)."
         )
-    return Fernet(key.encode())
+    # First key encrypts new data; any key decrypts, so rotation is done by
+    # prepending the new key and keeping old ones for as long as old
+    # ciphertext must remain readable.
+    return MultiFernet([Fernet(key.strip().encode()) for key in keys.split(",")])
 
 
 class EncryptedCharField(CharField):
