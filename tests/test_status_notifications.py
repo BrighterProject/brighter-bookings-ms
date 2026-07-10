@@ -11,6 +11,7 @@ import asyncio
 from datetime import date
 from unittest.mock import AsyncMock, MagicMock
 
+from app.i18n import format_date
 from app.routers.booking import _notify_booking_status_changed
 from app.schemas import BookingStatus
 
@@ -69,14 +70,9 @@ class TestCancellationNotification:
         data = kwargs["data"]
         assert "юни" in data["start_date"]
         assert "юни" in data["end_date"]
-        # cancelled_date is date.today(); assert against the current Bulgarian
-        # month so the test is not pinned to the month it was written in.
-        bg_months = [
-            "",
-            "януари", "февруари", "март", "април", "май", "юни",
-            "юли", "август", "септември", "октомври", "ноември", "декември",
-        ]
-        assert bg_months[date.today().month] in data["cancelled_date"]
+        # cancelled_date is "now", so assert it is the current date rendered in
+        # Bulgarian rather than a hard-coded month (which time-bombs each month).
+        assert data["cancelled_date"] == format_date(date.today(), "bg")
         assert kwargs["locale"] == "bg"
 
     def test_dates_english_by_default(self):

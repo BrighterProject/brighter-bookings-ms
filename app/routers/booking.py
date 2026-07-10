@@ -8,6 +8,8 @@ from loguru import logger
 
 from app import settings
 from app.cache import get_slots_cache, invalidate_slots_cache, set_slots_cache
+from app.checkin_dispatch import maybe_send_checkin_link
+from app.checkin_token import generate_checkin_token
 from app.crud import booking_crud
 from app.deps import (
     CurrentUser,
@@ -36,6 +38,7 @@ from app.schemas import (
     BookingSlot,
     BookingStatus,
     BookingStatusUpdate,
+    CheckinLinkResponse,
 )
 from app.scopes import BookingScope
 
@@ -547,6 +550,30 @@ async def get_booking(
     return results[0]
 
 
+@router.get("/{booking_id}/checkin-link", response_model=CheckinLinkResponse)
+@limiter.limit("30/minute")
+async def get_checkin_link(
+    request: Request,
+    booking_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> CheckinLinkResponse:
+    """Return the booking owner's (or an admin's) shareable check-in token on demand."""
+    booking = await booking_crud.get_booking(booking_id)
+    if booking is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
+    if booking.user_id != current_user.id and not current_user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    if booking.status != BookingStatus.CONFIRMED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Booking is not confirmed"
+        )
+    expires_at = booking.end_date + timedelta(days=settings.checkin_token_grace_days)
+    if date.today() > expires_at:
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Check-in link has expired")
+    token = generate_checkin_token(booking.id, end_date=booking.end_date)
+    return CheckinLinkResponse(token=token, expires_at=expires_at)
+
+
 # Tiered guest-cancellation refund schedule (Booking.com-style), keyed by the
 # property's cancellation_policy. Each entry is an ordered tuple of
 # (minimum days until check-in, refunded fraction of total_price); evaluated
@@ -676,6 +703,14 @@ async def update_booking_status(
                 properties_client,
                 refund_amount=refund_amount,
             )
+        )
+
+    # Short-notice bookings can't wait for the daily 08:00 sweep: fire the
+    # check-in link now if confirmation lands inside the dispatch lead window.
+    # No-op (and cron-safe) when outside the window or already sent.
+    if payload.status == BookingStatus.CONFIRMED:
+        asyncio.create_task(
+            maybe_send_checkin_link(booking_id, users_client, notifications_client)
         )
 
     return updated
