@@ -90,6 +90,48 @@ class TestListBookings:
         _, kwargs = mock_crud.list_bookings.call_args
         assert kwargs["filters"].status == "confirmed"
 
+    def test_owner_with_view_guest_sees_own_bookings_as_guest(self, owner_client):
+        """Property owner explicitly requesting view=guest gets user_id-filtered
+        results (bookings they made elsewhere as a guest), not property_owner_id."""
+        with patch(CRUD_PATH) as mock_crud:
+            mock_crud.list_bookings = AsyncMock(return_value=[booking_response()])
+            resp = owner_client.get("/bookings", params={"view": "guest"})
+        assert resp.status_code == 200
+        _, kwargs = mock_crud.list_bookings.call_args
+        assert kwargs.get("user_id") == PROPERTY_OWNER_ID
+        assert kwargs.get("property_owner_id") is None
+
+    def test_owner_without_view_param_still_sees_property_bookings(self, owner_client):
+        """Regression guard: admin-panel calls GET /bookings/ with no params and
+        must keep receiving property_owner_id-filtered results."""
+        with patch(CRUD_PATH) as mock_crud:
+            mock_crud.list_bookings = AsyncMock(return_value=[booking_response()])
+            resp = owner_client.get("/bookings")
+        assert resp.status_code == 200
+        _, kwargs = mock_crud.list_bookings.call_args
+        assert kwargs.get("property_owner_id") == PROPERTY_OWNER_ID
+        assert kwargs.get("user_id") is None
+
+    def test_owner_with_view_owner_still_sees_property_bookings(self, owner_client):
+        """Explicit view=owner behaves the same as omitting view for a manager."""
+        with patch(CRUD_PATH) as mock_crud:
+            mock_crud.list_bookings = AsyncMock(return_value=[booking_response()])
+            resp = owner_client.get("/bookings", params={"view": "owner"})
+        assert resp.status_code == 200
+        _, kwargs = mock_crud.list_bookings.call_args
+        assert kwargs.get("property_owner_id") == PROPERTY_OWNER_ID
+        assert kwargs.get("user_id") is None
+
+    def test_admin_with_view_guest_ignored(self, admin_client):
+        """Admin behavior is unchanged regardless of the view param."""
+        with patch(CRUD_PATH) as mock_crud:
+            mock_crud.list_bookings = AsyncMock(return_value=[booking_response()])
+            resp = admin_client.get("/bookings", params={"view": "guest"})
+        assert resp.status_code == 200
+        _, kwargs = mock_crud.list_bookings.call_args
+        assert kwargs.get("user_id") is None
+        assert kwargs.get("property_owner_id") is None
+
     def test_missing_auth_headers_returns_422(self, anon_app):
         with TestClient(anon_app) as c:
             resp = c.get("/bookings")
