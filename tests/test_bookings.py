@@ -693,12 +693,12 @@ class TestCreateBookingPricing:
         assert kwargs["start_date"] == START_DATE
         assert kwargs["end_date"] == END_DATE
 
-    def test_fallback_flat_rate_on_pricing_failure(self, client_factory):
-        """When resolve() returns flat rate (base × nights), booking still succeeds."""
-        from decimal import Decimal
+    def test_unpriced_stay_returns_409(self, client_factory):
+        """resolve() raising PricingGapError -> booking rejected with 409 + dates."""
+        from app.pricing_client import PricingGapError
 
-        # Flat: 50.00/night × 2 nights = 100.00
-        prc = self._pricing_client(total="100.00", avg="50.00")
+        prc = MagicMock()
+        prc.resolve = AsyncMock(side_effect=PricingGapError(["2026-06-09"]))
         client = client_factory(
             make_customer(),
             properties_client=self._mock_vc(),
@@ -707,9 +707,9 @@ class TestCreateBookingPricing:
         with patch(CRUD_PATH) as mock_crud:
             mock_crud.create_booking = AsyncMock(return_value=booking_response())
             resp = client.post("/bookings", json=booking_create_payload())
-        assert resp.status_code == 201
-        _, kwargs = mock_crud.create_booking.call_args
-        assert kwargs["total_price"] == Decimal("100.00")
+        assert resp.status_code == 409
+        assert resp.json()["detail"]["unpriced_dates"] == ["2026-06-09"]
+        mock_crud.create_booking.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
