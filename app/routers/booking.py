@@ -30,7 +30,7 @@ from app.deps import (
 )
 from app.i18n import format_date, format_short_date
 from app.limiter import limiter
-from app.pricing_client import PricingClient, get_pricing_client
+from app.pricing_client import PricingClient, PricingGapError, get_pricing_client
 from app.schemas import (
     BookingCreate,
     BookingEnriched,
@@ -478,14 +478,22 @@ async def create_booking(
         payload.property_id, current_user
     )
 
-    # 3. Resolve dynamic pricing; falls back to flat rate if properties-ms is unavailable
-    base_price = Decimal(str(property["price_per_night"]))
-    resolved_total, avg_price_per_night = await pricing_client.resolve(
-        property_id=payload.property_id,
-        start_date=payload.start_date,
-        end_date=payload.end_date,
-        base_price=base_price,
-    )
+    # 3. Resolve dynamic pricing from the calendar. A stay touching unpriced
+    #    nights is rejected — there is no base-price fallback.
+    try:
+        resolved_total, avg_price_per_night = await pricing_client.resolve(
+            property_id=payload.property_id,
+            start_date=payload.start_date,
+            end_date=payload.end_date,
+        )
+    except PricingGapError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "Selected dates include nights with no price set.",
+                "unpriced_dates": exc.unpriced_dates,
+            },
+        ) from exc
 
     # 3b. Apply gap tax if applicable
     gap_tax_pct = Decimal(str(property.get("gap_tax_pct", 0)))
