@@ -8,6 +8,7 @@ dependencies = [
     "cryptography>=49.0.0",
     "fastapi[standard]>=0.112.4",
     "httpx>=0.28",
+    "icalendar>=7.2.0",
     "loguru>=0.7.3",
     "ms-core",
     "opentelemetry-api>=1.42.1",

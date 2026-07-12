@@ -1,4 +1,6 @@
 from enum import StrEnum
+from typing import Final
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from ms_core import AbstractModel as Model
 from tortoise import fields
@@ -12,6 +14,29 @@ class BookingStatus(StrEnum):
     COMPLETED = "completed"  # booking period elapsed, marked done
     CANCELLED = "cancelled"  # cancelled by customer or admin
     NO_SHOW = "no_show"  # customer didn't show up
+
+
+class BookingChannel(StrEnum):
+    """Where a booking originated. Platform bookings are made on Brighter;
+    channel bookings are imported (read-only) from an external calendar feed."""
+
+    PLATFORM = "platform"
+    BOOKING_COM = "booking_com"
+
+
+class FeedSyncStatus(StrEnum):
+    """Outcome of the most recent sync attempt for an external calendar feed."""
+
+    OK = "ok"
+    FETCH_ERROR = "fetch_error"
+    PARSE_ERROR = "parse_error"
+
+
+# Fixed sentinel "user" owning every imported channel booking — there is no real
+# Brighter user behind a Booking.com reservation, and the iCal export carries no
+# guest PII. Deterministic so imports never invent per-row users and `user_id`
+# can stay non-nullable. Never resolves to a real account.
+CHANNEL_GUEST_USER_ID: Final[UUID] = uuid5(NAMESPACE_URL, "brighter:booking_com:channel-guest")
 
 
 class Gender(StrEnum):
@@ -54,10 +79,50 @@ class Booking(Model):
     payment_method = fields.CharField(max_length=20, null=True)  # card | bank_transfer | cash
     checkin_link_sent_at = fields.DatetimeField(null=True)  # idempotency marker: dispatch job
     guest_data_purged_at = fields.DatetimeField(null=True)  # idempotency marker: purge job
+
+    # Channel import (BTR-41): platform bookings are made on Brighter; channel
+    # bookings mirror an external calendar (Booking.com) and are read-only here.
+    channel = fields.CharEnumField(BookingChannel, default=BookingChannel.PLATFORM)
+    external_uid = fields.CharField(max_length=512, null=True)  # iCal VEVENT UID; null for platform
+
     updated_at = fields.DatetimeField(auto_now=True)
 
     class Meta:
         table = "bookings"
+        ordering = ["-created_at"]
+        # Idempotent channel upsert: one row per (property, channel, external UID).
+        # Platform bookings carry a NULL external_uid, which Postgres treats as
+        # distinct, so this never constrains normal bookings.
+        unique_together = (("property_id", "channel", "external_uid"),)
+
+
+class ExternalCalendarFeed(Model):
+    """An external iCal export URL an owner links to a property (BTR-41).
+
+    A background sweep polls each active feed and mirrors its reservations as
+    read-only channel ``Booking`` rows. Import-only: Brighter never publishes a
+    feed back to the channel.
+    """
+
+    id = fields.UUIDField(primary_key=True)
+
+    property_id = fields.UUIDField()  # not a FK — properties live in properties-ms
+    channel = fields.CharEnumField(BookingChannel, default=BookingChannel.BOOKING_COM)
+    url = fields.CharField(max_length=2048)
+    is_active = fields.BooleanField(default=True, db_index=True)  # sweep predicate
+
+    last_synced_at = fields.DatetimeField(null=True)
+    last_status = fields.CharEnumField(FeedSyncStatus, null=True)
+    last_error = fields.CharField(max_length=1024, null=True)  # truncated detail
+    # sha-256 of the normalized parsed events (sorted (uid,start,end)), NOT the raw
+    # body — the raw feed changes every fetch via DTSTAMP/PRODID and would defeat
+    # the unchanged-feed short-circuit.
+    content_hash = fields.CharField(max_length=64, null=True)
+
+    updated_at = fields.DatetimeField(auto_now=True)
+
+    class Meta:
+        table = "external_calendar_feeds"
         ordering = ["-created_at"]
 
 

@@ -30,3 +30,8 @@ booking_purge_window_days = int(os.environ.get("BOOKING_PURGE_WINDOW_DAYS", "14"
 # Fallback max advance-booking window (days) when a property doesn't report one.
 # Kept in sync with properties-ms; properties-ms is the source of truth per property.
 BOOKING_WINDOW_DAYS = int(os.environ.get("BOOKING_WINDOW_DAYS", "180"))
+
+# External calendar sync (BTR-41). The CronJob cadence itself lives in infra
+# (CALENDAR_SYNC_POLL_MINUTES on the k8s CronJob schedule); these gate app behaviour.
+calendar_sync_fetch_timeout = float(os.environ.get("CALENDAR_SYNC_FETCH_TIMEOUT", "10"))
+calendar_sync_jitter_ms = int(os.environ.get("CALENDAR_SYNC_JITTER_MS", "500"))

@@ -59,8 +59,14 @@ app/
   crud.py              # BookingCRUD — all DB operations (conflict checks, CRUD)
   deps.py              # Auth deps, PropertiesClient, scope checkers
   scopes.py            # BookingScope StrEnum + BOOKING_SCOPE_DESCRIPTIONS
+  feed_url.py          # SSRF guards for external feed URLs (BTR-41)
+  services/
+    ical_parser.py     # parse Booking.com iCal exports → normalized events (BTR-41)
+    calendar_sync.py   # fetch + diff + upsert sync engine (BTR-41)
   routers/
     booking.py         # /bookings CRUD + status transitions + GET /bookings/slots
+    calendar_feeds.py  # owner-facing /bookings/calendar-feeds CRUD + sync-now (BTR-41)
+    internal_calendar_sync.py  # /internal/calendar-sync/run cron sweep (BTR-41)
 tests/
   conftest.py          # Fixtures: customer_client, owner_client, admin_client, anon_app, client_factory
   factories.py         # make_customer(), make_property_owner(), make_admin(), booking_response(), etc.
@@ -101,13 +107,48 @@ Terminal states: `COMPLETED`, `CANCELLED`, `NO_SHOW` — no further transitions 
 
 ## Booking model
 
-Fields: `id`, `property_id`, `property_owner_id`, `user_id`, `start_date`, `end_date`, `status`, `price_per_night`, `total_price`, `currency`, `guest_name`, `guest_email`, `guest_phone`, `special_requests`, `updated_at`.
+Fields: `id`, `property_id`, `property_owner_id`, `user_id`, `start_date`, `end_date`, `status`, `price_per_night`, `total_price`, `currency`, `guest_name`, `guest_email`, `guest_phone`, `special_requests`, `channel`, `external_uid`, `updated_at`.
 
 `property_owner_id` is denormalized from properties-ms at booking creation time to avoid cross-service lookups on every status update. Do not expose it as a writable field.
+
+`channel` (`platform` default / `booking_com`) tags where a booking originated; `external_uid` is the source iCal `VEVENT` UID (null for platform bookings). Unique together on `(property_id, channel, external_uid)` for idempotent channel upserts. See **Channel calendar import** below.
 
 ### Pricing model
 
 Nightly pricing: `total_price = price_per_night × num_nights` where `num_nights = (end_date - start_date).days`. Minimum 1 night. `price_per_night` is copied from the property at creation time.
+
+## Channel calendar import (BTR-41)
+
+Import-only iCal sync so a property is never sold twice for the same night. We
+**import** Booking.com reservations to protect our calendar; we never publish a feed
+back or push availability (owner manages Booking.com manually). See the design spec
+`docs/superpowers/specs/2026-07-12-bookingcom-calendar-import-design.md`.
+
+- `ExternalCalendarFeed` model: owner links a property to a Booking.com iCal export
+  URL. A k8s CronJob (`/internal/calendar-sync/run`, every ~10 min, `concurrencyPolicy:
+  Forbid`) sweeps active feeds.
+- Each reservation becomes a **real, read-only `Booking` row** (`channel=booking_com`,
+  `status=CONFIRMED`, `user_id=CHANNEL_GUEST_USER_ID` sentinel, price `0`,
+  `guest_name="Booking.com"`). This reuses the existing conflict check + `/slots`
+  picker with zero new wiring — imports block platform bookings automatically.
+- **Read-only enforcement**: the status-transition endpoint rejects (409) any
+  transition on a `channel != platform` booking — the sync engine owns their
+  lifecycle. Truncation/cancellation are direct field writes by the engine and bypass
+  those API rules by design.
+- **Fail-safe sync** (`app/services/calendar_sync.py`): a fetch/parse error keeps all
+  existing imported rows (never free a date we can't re-verify). Feeds are skipped when
+  the **normalized** content hash (sorted `(uid,start,end)`, not the raw body) is
+  unchanged. Vanished UIDs resolve by `end_date`: future → cancel; mid-stay → truncate
+  `end_date=today`; fully elapsed → leave untouched ("the vanishing past").
+- **SSRF guard** (`app/feed_url.py`): feed URLs must be `https://*.booking.com`;
+  redirects are followed but re-validated per hop against the host allowlist + a
+  private/link-local/loopback IP denylist.
+- Metrics: `calendar_feeds_synced_total`, `channel_bookings_imported_total`,
+  `calendar_feed_fetch_errors_total`, `channel_overbookings_total`.
+- Owner API (scope `bookings:manage` + property ownership): `GET/POST
+  /bookings/calendar-feeds`, `DELETE /bookings/calendar-feeds/{id}`, `POST
+  /bookings/calendar-feeds/{id}/sync-now`. Managed in the admin panel property form
+  ("Външни календари" section).
 
 ## Testing conventions
 
@@ -154,6 +195,9 @@ uv run tortoise -c main.TORTOISE_ORM migrate
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://otel-collector:4317` | OTLP gRPC endpoint |
 | `OTEL_SDK_DISABLED` | `false` | Set `true` to skip telemetry (CI / light dev) |
 | `LOG_COLORIZE` | `false` | Set `true` for ANSI-coloured logs in compose |
+| `INTERNAL_CRON_SECRET` | `""` | Shared secret gating `/internal/*` cron endpoints (calendar sweep) |
+| `CALENDAR_SYNC_FETCH_TIMEOUT` | `10` | Per-feed iCal fetch timeout (s) — channel import (BTR-41) |
+| `CALENDAR_SYNC_JITTER_MS` | `500` | Max random delay between feeds in a sweep (BTR-41) |
 
 ## Git & Branch Workflow
 
