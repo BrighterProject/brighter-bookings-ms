@@ -2,8 +2,10 @@
 
 Two layers:
 
-1. :func:`validate_feed_url` — cheap, synchronous scheme + host allowlist. Applied
-   when an owner registers a feed and re-applied to every redirect hop.
+1. :func:`validate_feed_url` — cheap, synchronous scheme + per-channel host
+   allowlist. Applied when an owner registers a feed and re-applied to every
+   redirect hop. The host allowlist itself lives in :mod:`app.channels` so a new
+   channel needs no edit here.
 2. :func:`assert_host_is_public` — resolves the host and rejects any private /
    loopback / link-local address, so an allowlisted host can never be pointed at
    an internal service. Blocking (DNS); call it via ``asyncio.to_thread`` from
@@ -14,36 +16,29 @@ from __future__ import annotations
 
 import ipaddress
 import socket
-from typing import Final
 from urllib.parse import urlparse
 
-# v1 allowlist: only Booking.com. Widen deliberately when more channels ship.
-_ALLOWED_HOST_EXACT: Final[frozenset[str]] = frozenset({"booking.com"})
-_ALLOWED_HOST_SUFFIX: Final[str] = ".booking.com"
+from app.channels import is_allowed_feed_host
+from app.models import BookingChannel
 
 
 class FeedUrlError(ValueError):
     """Raised when a feed URL fails an SSRF check."""
 
 
-def is_allowed_feed_host(host: str) -> bool:
-    """True if ``host`` is booking.com or a subdomain of it (case-insensitive)."""
-    host = host.lower().rstrip(".")
-    return host in _ALLOWED_HOST_EXACT or host.endswith(_ALLOWED_HOST_SUFFIX)
-
-
-def validate_feed_url(url: str) -> str:
-    """Return ``url`` unchanged if it is an ``https://*.booking.com`` URL.
+def validate_feed_url(url: str, channel: BookingChannel) -> str:
+    """Return ``url`` unchanged if it is an ``https`` URL on ``channel``'s domain.
 
     Raises:
-        FeedUrlError: if the scheme is not https or the host is not allowlisted.
+        FeedUrlError: if the scheme is not https or the host is not allowlisted
+            for the given channel.
     """
     parsed = urlparse(url)
     if parsed.scheme != "https":
         raise FeedUrlError("Feed URL must use https")
     host = parsed.hostname or ""
-    if not is_allowed_feed_host(host):
-        raise FeedUrlError("Feed URL host must be a booking.com domain")
+    if not is_allowed_feed_host(host, channel):
+        raise FeedUrlError(f"Feed URL host is not allowed for channel '{channel.value}'")
     return url
 
 

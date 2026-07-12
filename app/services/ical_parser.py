@@ -17,9 +17,13 @@ from zoneinfo import ZoneInfo
 
 from icalendar import Calendar
 
-# Booking dates are Bulgarian local calendar dates; a timed VEVENT is resolved
-# against this zone before its date is taken.
-_LOCAL_TZ = ZoneInfo("Europe/Sofia")
+from app import settings
+
+# Booking dates are local calendar dates; a timed VEVENT is resolved against this
+# zone before its date is taken. Configurable via CALENDAR_LOCAL_TZ (default
+# Europe/Sofia) — see settings.calendar_local_tz. All-day VALUE=DATE events (the
+# norm for Booking.com/Airbnb) are timezone-independent and ignore this entirely.
+_LOCAL_TZ = ZoneInfo(settings.calendar_local_tz)
 
 
 class CalendarParseError(ValueError):
@@ -35,27 +39,28 @@ class ParsedEvent:
     end_date: date
 
 
-def _to_local_date(value: object) -> date:
+def _to_local_date(value: object, local_tz: ZoneInfo) -> date:
     """Map an iCal DTSTART/DTEND value to a bare local date.
 
     ``VALUE=DATE`` yields a ``date`` directly; a ``DATE-TIME`` is converted to
-    Europe/Sofia first so the calendar date matches how bookings are stored.
+    ``local_tz`` first so the calendar date matches how bookings are stored.
     """
     if isinstance(value, datetime):
         if value.tzinfo is not None:
-            value = value.astimezone(_LOCAL_TZ)
+            value = value.astimezone(local_tz)
         return value.date()
     if isinstance(value, date):
         return value
     raise CalendarParseError(f"Unsupported date value: {value!r}")
 
 
-def parse_ics(text: str) -> list[ParsedEvent]:
+def parse_ics(text: str, local_tz: ZoneInfo = _LOCAL_TZ) -> list[ParsedEvent]:
     """Parse an iCal body into events.
 
     VEVENTs without a UID are skipped (they cannot be diffed idempotently). A
     body that is not valid iCal, or a VEVENT missing DTSTART, raises
     :class:`CalendarParseError` so the caller can fail safe (keep existing rows).
+    ``local_tz`` resolves any stray timed value (defaults to the configured zone).
     """
     try:
         cal = Calendar.from_ical(text)
@@ -68,11 +73,11 @@ def parse_ics(text: str) -> list[ParsedEvent]:
         dtstart = component.get("DTSTART")
         if uid is None or dtstart is None:
             continue
-        start = _to_local_date(dtstart.dt)
+        start = _to_local_date(dtstart.dt, local_tz)
 
         dtend = component.get("DTEND")
         # No DTEND on an all-day event ⇒ single night (exclusive end = next day).
-        end = _to_local_date(dtend.dt) if dtend is not None else start + timedelta(days=1)
+        end = _to_local_date(dtend.dt, local_tz) if dtend is not None else start + timedelta(days=1)
 
         # A zero/negative range is meaningless for occupancy — drop it.
         if end <= start:

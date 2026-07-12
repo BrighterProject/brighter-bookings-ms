@@ -7,6 +7,7 @@ timed-event down-conversion, and normalized content-hash stability.
 from __future__ import annotations
 
 from datetime import date
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -100,6 +101,40 @@ def test_timed_event_downconverted_to_local_date():
     events = parse_ics(_feed(timed))
     assert events[0].start_date == date(2026, 7, 12)
     assert events[0].end_date == date(2026, 7, 15)
+
+
+def test_airbnb_export_shape_parses_identically():
+    # Airbnb exports the same all-day VALUE=DATE VEVENTs (SUMMARY "Reserved",
+    # UID @airbnb.com) — the parser is channel-agnostic.
+    airbnb = (
+        "BEGIN:VEVENT\n"
+        "DTSTART;VALUE=DATE:20260801\n"
+        "DTEND;VALUE=DATE:20260805\n"
+        "SUMMARY:Reserved\n"
+        "UID:abc123@airbnb.com\n"
+        "DTSTAMP:20260712T000000Z\n"
+        "END:VEVENT"
+    )
+    events = parse_ics(_feed(airbnb))
+    assert events[0].uid == "abc123@airbnb.com"
+    assert events[0].start_date == date(2026, 8, 1)
+    assert events[0].end_date == date(2026, 8, 5)
+
+
+def test_custom_local_tz_shifts_timed_event_date():
+    # A UTC 23:00 start lands on the next calendar day in Sofia (+3 in August).
+    timed = (
+        "BEGIN:VEVENT\n"
+        "DTSTART:20260801T230000Z\n"
+        "DTEND:20260805T230000Z\n"
+        "UID:t@airbnb.com\n"
+        "DTSTAMP:20260712T000000Z\n"
+        "END:VEVENT"
+    )
+    utc = parse_ics(_feed(timed), local_tz=ZoneInfo("UTC"))
+    sofia = parse_ics(_feed(timed), local_tz=ZoneInfo("Europe/Sofia"))
+    assert utc[0].start_date == date(2026, 8, 1)
+    assert sofia[0].start_date == date(2026, 8, 2)
 
 
 def test_malformed_body_raises_parse_error():

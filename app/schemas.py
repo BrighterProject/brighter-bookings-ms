@@ -11,7 +11,6 @@ from pydantic import (
     ConfigDict,
     Field,
     ValidationError,
-    field_validator,
     model_validator,
 )
 from pydantic_core import InitErrorDetails
@@ -272,15 +271,15 @@ class CalendarFeedCreate(BaseModel):
     channel: BookingChannel = BookingChannel.BOOKING_COM
     url: str = Field(max_length=2048)
 
-    @field_validator("url")
-    @classmethod
-    def _validate_url(cls, value: str) -> str:
-        # SSRF guard: only https://*.booking.com. Redirects are re-checked per hop
-        # at fetch time (see app.services.calendar_sync).
+    @model_validator(mode="after")
+    def _validate_url(self) -> CalendarFeedCreate:
+        # SSRF guard: https + the selected channel's host allowlist. Redirects are
+        # re-checked per hop at fetch time (see app.services.calendar_sync).
         try:
-            return validate_feed_url(value)
+            validate_feed_url(self.url, self.channel)
         except FeedUrlError as exc:
             raise ValueError(str(exc)) from exc
+        return self
 
 
 class CalendarFeedResponse(BaseModel):

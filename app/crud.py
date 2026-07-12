@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
@@ -8,6 +9,7 @@ from fastapi import HTTPException, status
 from ms_core import CRUD
 from tortoise.transactions import in_transaction
 
+from app.channels import channel_display_name
 from app.models import (
     CHANNEL_GUEST_USER_ID,
     Booking,
@@ -23,6 +25,7 @@ from app.schemas import (
     BookingStatusUpdate,
     CalendarFeedResponse,
 )
+from app.services.ical_parser import ParsedEvent
 
 
 def _overlaps_unavailabilities(
@@ -210,70 +213,92 @@ class BookingCRUD(CRUD[Booking, BookingResponse]):  # type: ignore
         rows = await Booking.filter(property_id=property_id, channel=channel)
         return [BookingResponse.model_validate(b, from_attributes=True) for b in rows]
 
-    async def has_platform_conflict(self, property_id: UUID, start: date, end: date) -> bool:
-        """True if an active *platform* booking overlaps [start, end).
+    async def active_platform_ranges(self, property_id: UUID) -> list[tuple[date, date]]:
+        """``(start, end)`` of every active *platform* booking for a property.
 
-        Used to flag an incoming channel reservation that overbooks a stay already
-        sold on Brighter — recorded anyway, but surfaced via log + metric.
+        Fetched once per sync so the overbooking check for a whole feed is a single
+        query instead of one per incoming reservation.
         """
-        return await Booking.filter(
+        rows = await Booking.filter(
             property_id=property_id,
             channel=BookingChannel.PLATFORM,
             status__in=[BookingStatus.PENDING, BookingStatus.CONFIRMED],
-            start_date__lt=end,
-            end_date__gt=start,
-        ).exists()
+        ).values_list("start_date", "end_date")
+        return [(start, end) for start, end in rows]
 
-    async def upsert_channel_booking(
+    async def bulk_upsert_channel_bookings(
         self,
         *,
         property_id: UUID,
         property_owner_id: UUID,
         channel: BookingChannel,
-        external_uid: str,
-        start_date: date,
-        end_date: date,
         currency: str,
-    ) -> tuple[BookingResponse, bool]:
-        """Create or refresh an imported booking, idempotent on (property, channel, uid).
-
-        The unique constraint on ``(property_id, channel, external_uid)`` makes a
-        re-import a no-op / update rather than a duplicate.
-        """
-        inst, created = await Booking.update_or_create(
-            property_id=property_id,
-            channel=channel,
-            external_uid=external_uid,
-            defaults={
-                "property_owner_id": property_owner_id,
-                "user_id": CHANNEL_GUEST_USER_ID,
-                "start_date": start_date,
-                "end_date": end_date,
-                "status": BookingStatus.CONFIRMED,
-                "price_per_night": Decimal("0"),
-                "total_price": Decimal("0"),
-                "currency": currency,
-                "num_guests": 1,
-                "guest_name": "Booking.com",
-            },
-        )
-        return BookingResponse.model_validate(inst, from_attributes=True), created
-
-    async def set_channel_booking_dates(
-        self, booking_id: UUID, start_date: date, end_date: date
+        events: list[ParsedEvent],
     ) -> None:
-        """Update an imported booking's dates (also re-confirms a resurrected UID)."""
-        await Booking.filter(id=booking_id).update(
-            start_date=start_date, end_date=end_date, status=BookingStatus.CONFIRMED
-        )
+        """Insert freshly-seen imported reservations in a single round-trip.
 
-    async def cancel_channel_booking(self, booking_id: UUID) -> None:
-        """Mark an imported booking CANCELLED — its UID vanished before check-in."""
-        await Booking.filter(id=booking_id).update(status=BookingStatus.CANCELLED)
+        ``events`` are the feed's genuinely-new UIDs (the diff already excluded
+        existing ones). ``ignore_conflicts`` keeps the write idempotent against the
+        ``(property_id, channel, external_uid)`` unique constraint should a manual
+        sync race the cron sweep — the next sweep reconciles any skipped row.
+        """
+        if not events:
+            return
+        guest_name = channel_display_name(channel)
+        rows = [
+            Booking(
+                property_id=property_id,
+                property_owner_id=property_owner_id,
+                user_id=CHANNEL_GUEST_USER_ID,
+                channel=channel,
+                external_uid=ev.uid,
+                start_date=ev.start_date,
+                end_date=ev.end_date,
+                status=BookingStatus.CONFIRMED,
+                price_per_night=Decimal("0"),
+                total_price=Decimal("0"),
+                currency=currency,
+                num_guests=1,
+                guest_name=guest_name,
+            )
+            for ev in events
+        ]
+        await Booking.bulk_create(rows, ignore_conflicts=True)
 
-    async def truncate_channel_booking(self, booking_id: UUID, new_end: date) -> None:
-        """Shorten a mid-stay imported booking so future nights free up for resale."""
-        await Booking.filter(id=booking_id).update(end_date=new_end)
+    async def bulk_set_channel_booking_dates(
+        self, updates: list[tuple[UUID, date, date]]
+    ) -> None:
+        """Apply date changes to imported bookings in one statement.
+
+        Also re-confirms a resurrected UID (status back to CONFIRMED).
+        """
+        if not updates:
+            return
+        rows = [
+            Booking(id=bid, start_date=start, end_date=end, status=BookingStatus.CONFIRMED)
+            for bid, start, end in updates
+        ]
+        await Booking.bulk_update(rows, fields=["start_date", "end_date", "status"])
+
+    async def bulk_cancel_channel_bookings(self, booking_ids: list[UUID]) -> None:
+        """CANCEL every listed imported booking — their UIDs vanished before check-in."""
+        if not booking_ids:
+            return
+        await Booking.filter(id__in=booking_ids).update(status=BookingStatus.CANCELLED)
+
+    async def bulk_truncate_channel_bookings(self, truncations: list[tuple[UUID, date]]) -> None:
+        """Shorten mid-stay imported bookings so future nights free up for resale.
+
+        Grouped by target ``end_date`` (the sweep truncates every mid-stay row to
+        ``today``, so this is normally a single UPDATE).
+        """
+        if not truncations:
+            return
+        by_end: dict[date, list[UUID]] = defaultdict(list)
+        for bid, new_end in truncations:
+            by_end[new_end].append(bid)
+        for new_end, ids in by_end.items():
+            await Booking.filter(id__in=ids).update(end_date=new_end)
 
 
 booking_crud = BookingCRUD(Booking, BookingResponse)

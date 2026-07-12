@@ -18,10 +18,14 @@ class BookingStatus(StrEnum):
 
 class BookingChannel(StrEnum):
     """Where a booking originated. Platform bookings are made on Brighter;
-    channel bookings are imported (read-only) from an external calendar feed."""
+    channel bookings are imported (read-only) from an external calendar feed.
+
+    Every non-``PLATFORM`` member must have a matching entry in
+    ``app.channels.CHANNEL_SPECS`` (host allowlist + display label)."""
 
     PLATFORM = "platform"
     BOOKING_COM = "booking_com"
+    AIRBNB = "airbnb"
 
 
 class FeedSyncStatus(StrEnum):

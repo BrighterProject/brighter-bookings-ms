@@ -35,3 +35,12 @@ BOOKING_WINDOW_DAYS = int(os.environ.get("BOOKING_WINDOW_DAYS", "180"))
 # (CALENDAR_SYNC_POLL_MINUTES on the k8s CronJob schedule); these gate app behaviour.
 calendar_sync_fetch_timeout = float(os.environ.get("CALENDAR_SYNC_FETCH_TIMEOUT", "10"))
 calendar_sync_jitter_ms = int(os.environ.get("CALENDAR_SYNC_JITTER_MS", "500"))
+# Hard cap on a fetched iCal body — feeds beyond this are rejected before parsing
+# so a malicious/misconfigured origin can never OOM the pod. Booking.com/Airbnb
+# exports for a single unit are a few KB; 5 MiB is a very generous ceiling.
+calendar_sync_max_bytes = int(os.environ.get("CALENDAR_SYNC_MAX_BYTES", str(5 * 1024 * 1024)))
+# Calendar dates in feeds without an explicit time are interpreted in this zone.
+# Booking.com/Airbnb exports are all-day VALUE=DATE (tz-independent); this only
+# affects the defensive down-convert of a stray DATE-TIME value. Platform-wide
+# because parsing happens before the per-property lookup.
+calendar_local_tz = os.environ.get("CALENDAR_LOCAL_TZ", "Europe/Sofia")

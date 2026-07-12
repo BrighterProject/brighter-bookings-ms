@@ -70,18 +70,19 @@ class FeedFetchError(Exception):
     """Network/HTTP failure fetching a feed (recorded as fetch_error, fail-safe)."""
 
 
-async def fetch_ics(url: str, timeout: float) -> str:
+async def fetch_ics(url: str, timeout: float, channel: BookingChannel) -> str:
     """Fetch an iCal body, following redirects but re-validating every hop.
 
-    Booking.com serves legitimate CDN/geo ``301/302``s, so we follow them — but at
-    each hop we re-assert the target is ``https://*.booking.com`` **and** does not
+    Channels serve legitimate CDN/geo ``301/302``s, so we follow them — but at each
+    hop we re-assert the target is on the channel's host allowlist **and** does not
     resolve to a private/link-local/loopback address before connecting. This keeps
-    the SSRF allowlist intact across redirects. One retry on transient error.
+    the SSRF allowlist intact across redirects. The body is streamed with a hard
+    size cap so a hostile origin cannot OOM the pod. One retry on transient error.
     """
     last_exc: Exception | None = None
     for attempt in range(2):
         try:
-            return await _fetch_once(url, timeout)
+            return await _fetch_once(url, timeout, channel)
         except FeedUrlError:
             raise  # allowlist violation — not transient, do not retry
         except (httpx.HTTPError, FeedFetchError) as exc:
@@ -91,23 +92,46 @@ async def fetch_ics(url: str, timeout: float) -> str:
     raise FeedFetchError(str(last_exc))
 
 
-async def _fetch_once(url: str, timeout: float) -> str:
+async def _read_capped_body(resp: httpx.Response) -> str:
+    """Stream a response body into text, aborting past ``calendar_sync_max_bytes``.
+
+    Checks the advertised ``Content-Length`` up front and, since that header is
+    advisory, also enforces the cap on the bytes actually received.
+    """
+    max_bytes = settings.calendar_sync_max_bytes
+    declared = resp.headers.get("content-length")
+    if declared is not None and declared.isdigit() and int(declared) > max_bytes:
+        raise FeedFetchError(f"Feed body exceeds {max_bytes} bytes (declared {declared})")
+    buffer = bytearray()
+    async for chunk in resp.aiter_bytes():
+        buffer.extend(chunk)
+        if len(buffer) > max_bytes:
+            raise FeedFetchError(f"Feed body exceeds {max_bytes} bytes")
+    return buffer.decode(resp.charset_encoding or "utf-8", errors="replace")
+
+
+async def _fetch_once(url: str, timeout: float, channel: BookingChannel) -> str:
     async with httpx.AsyncClient(follow_redirects=False, timeout=timeout) as client:
         current = url
+        visited: set[str] = set()
         for _ in range(_MAX_REDIRECTS + 1):
-            validate_feed_url(current)  # scheme + host allowlist
+            if current in visited:
+                raise FeedFetchError("Cyclic redirect detected")
+            visited.add(current)
+
+            validate_feed_url(current, channel)  # scheme + host allowlist
             host = urlparse(current).hostname or ""
             await asyncio.to_thread(assert_host_is_public, host)  # private-IP denylist
 
-            resp = await client.get(current)
-            if resp.is_redirect:
-                location = resp.headers.get("location")
-                if not location:
-                    raise FeedFetchError("Redirect without Location header")
-                current = urljoin(current, location)
-                continue
-            resp.raise_for_status()
-            return resp.text
+            async with client.stream("GET", current) as resp:
+                if resp.is_redirect:
+                    location = resp.headers.get("location")
+                    if not location:
+                        raise FeedFetchError("Redirect without Location header")
+                    current = urljoin(current, location)
+                    continue
+                resp.raise_for_status()
+                return await _read_capped_body(resp)
         raise FeedFetchError("Too many redirects")
 
 
@@ -126,6 +150,11 @@ class SyncActions:
     cancels: list[UUID] = field(default_factory=list)
     # (booking_id, new_end=today) for mid-stay shortenings.
     truncations: list[tuple[UUID, date]] = field(default_factory=list)
+
+
+def _overlaps_any(start: date, end: date, ranges: list[tuple[date, date]]) -> bool:
+    """True if ``[start, end)`` overlaps any ``[s, e)`` in ``ranges`` (half-open)."""
+    return any(start < e and end > s for s, e in ranges)
 
 
 def diff_feed(
@@ -193,7 +222,7 @@ async def sync_feed(feed: FeedLike) -> FeedSyncStatus:
 
     # 1. Fetch
     try:
-        body = await fetch_ics(feed.url, settings.calendar_sync_fetch_timeout)
+        body = await fetch_ics(feed.url, settings.calendar_sync_fetch_timeout, feed.channel)
     except (FeedFetchError, FeedUrlError, httpx.HTTPError) as exc:
         _fetch_errors.add(1, {"reason": "fetch"})
         logger.warning("Feed {} fetch failed — keeping existing rows: {}", feed_id, exc)
@@ -250,38 +279,35 @@ async def sync_feed(feed: FeedLike) -> FeedSyncStatus:
     existing = await booking_crud.list_channel_bookings(property_id, feed.channel)
     actions = diff_feed(existing, events, today_in_sofia())
 
-    # 6. Apply. Creates first (with overbooking check), then updates/cancels/truncations.
-    imported = 0
-    for ev in actions.creates:
-        if await booking_crud.has_platform_conflict(property_id, ev.start_date, ev.end_date):
-            _overbookings.add(1)
-            logger.warning(
-                "Imported reservation {} overlaps a platform booking on property {} "
-                "[{}..{}) — recording anyway",
-                ev.uid,
-                property_id,
-                ev.start_date,
-                ev.end_date,
-            )
-        await booking_crud.upsert_channel_booking(
+    # 6. Apply — bulk. Each action group is a single round-trip regardless of feed
+    #    size (a fresh feed with hundreds of reservations no longer means hundreds
+    #    of inserts). The overbooking check fetches platform occupancy once, then
+    #    flags overlaps in memory.
+    if actions.creates:
+        platform_ranges = await booking_crud.active_platform_ranges(property_id)
+        for ev in actions.creates:
+            if _overlaps_any(ev.start_date, ev.end_date, platform_ranges):
+                _overbookings.add(1)
+                logger.warning(
+                    "Imported reservation {} overlaps a platform booking on property {} "
+                    "[{}..{}) — recording anyway",
+                    ev.uid,
+                    property_id,
+                    ev.start_date,
+                    ev.end_date,
+                )
+        await booking_crud.bulk_upsert_channel_bookings(
             property_id=property_id,
             property_owner_id=property_owner_id,
             channel=feed.channel,
-            external_uid=ev.uid,
-            start_date=ev.start_date,
-            end_date=ev.end_date,
             currency=currency,
+            events=actions.creates,
         )
-        imported += 1
+    await booking_crud.bulk_set_channel_booking_dates(actions.updates)
+    await booking_crud.bulk_cancel_channel_bookings(actions.cancels)
+    await booking_crud.bulk_truncate_channel_bookings(actions.truncations)
 
-    for booking_id, new_start, new_end in actions.updates:
-        await booking_crud.set_channel_booking_dates(booking_id, new_start, new_end)
-        imported += 1
-    for booking_id in actions.cancels:
-        await booking_crud.cancel_channel_booking(booking_id)
-    for booking_id, new_end in actions.truncations:
-        await booking_crud.truncate_channel_booking(booking_id, new_end)
-
+    imported = len(actions.creates) + len(actions.updates)
     if imported:
         _bookings_imported.add(imported)
 

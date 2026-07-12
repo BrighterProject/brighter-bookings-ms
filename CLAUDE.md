@@ -120,17 +120,32 @@ Nightly pricing: `total_price = price_per_night × num_nights` where `num_nights
 ## Channel calendar import (BTR-41)
 
 Import-only iCal sync so a property is never sold twice for the same night. We
-**import** Booking.com reservations to protect our calendar; we never publish a feed
-back or push availability (owner manages Booking.com manually). See the design spec
+**import** channel reservations to protect our calendar; we never publish a feed
+back or push availability (owner manages each channel manually). See the design spec
 `docs/superpowers/specs/2026-07-12-bookingcom-calendar-import-design.md`.
 
-- `ExternalCalendarFeed` model: owner links a property to a Booking.com iCal export
-  URL. A k8s CronJob (`/internal/calendar-sync/run`, every ~10 min, `concurrencyPolicy:
-  Forbid`) sweeps active feeds.
-- Each reservation becomes a **real, read-only `Booking` row** (`channel=booking_com`,
-  `status=CONFIRMED`, `user_id=CHANNEL_GUEST_USER_ID` sentinel, price `0`,
-  `guest_name="Booking.com"`). This reuses the existing conflict check + `/slots`
-  picker with zero new wiring — imports block platform bookings automatically.
+- **Channels are pluggable.** `app/channels.py` holds a `CHANNEL_SPECS` registry
+  (display label + SSRF host allowlist) keyed by `BookingChannel`. Supported today:
+  **Booking.com** (`*.booking.com`) and **Airbnb** (`*.airbnb.com`) — both export the
+  same all-day `VALUE=DATE` VEVENTs, so the parser/sync engine are channel-agnostic.
+  Adding a channel = one `BookingChannel` member + one `CHANNEL_SPECS` entry.
+- **Bulk apply.** Reconciliation is applied in bulk (`bulk_upsert_channel_bookings`,
+  `bulk_set_channel_booking_dates`, `bulk_cancel_channel_bookings`,
+  `bulk_truncate_channel_bookings`) — each action group is one round-trip regardless
+  of feed size. The overbooking check fetches platform occupancy once
+  (`active_platform_ranges`) and flags overlaps in memory.
+- **Fetch hardening.** `fetch_ics` streams the body with a `CALENDAR_SYNC_MAX_BYTES`
+  cap (OOM guard) and detects cyclic redirects (visited-URL set), re-validating the
+  channel host allowlist + private-IP denylist at every hop.
+
+- `ExternalCalendarFeed` model: owner links a property to a channel iCal export URL
+  (Booking.com or Airbnb). A k8s CronJob (`/internal/calendar-sync/run`, every ~10
+  min, `concurrencyPolicy: Forbid`) sweeps active feeds.
+- Each reservation becomes a **real, read-only `Booking` row** (`channel=booking_com`
+  or `airbnb`, `status=CONFIRMED`, `user_id=CHANNEL_GUEST_USER_ID` sentinel, price
+  `0`, `guest_name=` the channel's display label from `CHANNEL_SPECS`). This reuses
+  the existing conflict check + `/slots` picker with zero new wiring — imports block
+  platform bookings automatically.
 - **Read-only enforcement**: the status-transition endpoint rejects (409) any
   transition on a `channel != platform` booking — the sync engine owns their
   lifecycle. Truncation/cancellation are direct field writes by the engine and bypass
@@ -140,8 +155,9 @@ back or push availability (owner manages Booking.com manually). See the design s
   the **normalized** content hash (sorted `(uid,start,end)`, not the raw body) is
   unchanged. Vanished UIDs resolve by `end_date`: future → cancel; mid-stay → truncate
   `end_date=today`; fully elapsed → leave untouched ("the vanishing past").
-- **SSRF guard** (`app/feed_url.py`): feed URLs must be `https://*.booking.com`;
-  redirects are followed but re-validated per hop against the host allowlist + a
+- **SSRF guard** (`app/feed_url.py` + `app/channels.py`): feed URLs must be `https`
+  on the selected channel's allowlisted domain (`*.booking.com` / `*.airbnb.com`);
+  redirects are followed but re-validated per hop against that allowlist + a
   private/link-local/loopback IP denylist.
 - Metrics: `calendar_feeds_synced_total`, `channel_bookings_imported_total`,
   `calendar_feed_fetch_errors_total`, `channel_overbookings_total`.
@@ -198,6 +214,8 @@ uv run tortoise -c main.TORTOISE_ORM migrate
 | `INTERNAL_CRON_SECRET` | `""` | Shared secret gating `/internal/*` cron endpoints (calendar sweep) |
 | `CALENDAR_SYNC_FETCH_TIMEOUT` | `10` | Per-feed iCal fetch timeout (s) — channel import (BTR-41) |
 | `CALENDAR_SYNC_JITTER_MS` | `500` | Max random delay between feeds in a sweep (BTR-41) |
+| `CALENDAR_SYNC_MAX_BYTES` | `5242880` | Hard cap on a fetched iCal body (DoS guard); streamed and aborted past this |
+| `CALENDAR_LOCAL_TZ` | `Europe/Sofia` | Zone for resolving stray timed VEVENTs (all-day feeds are tz-independent) |
 
 ## Git & Branch Workflow
 

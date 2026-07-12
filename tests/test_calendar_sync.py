@@ -135,6 +135,9 @@ def _client_factory(handler):
     return make
 
 
+BC = BookingChannel.BOOKING_COM
+
+
 class TestFetchIcs:
     async def test_follows_booking_com_redirect(self):
         def handler(request: httpx.Request) -> httpx.Response:
@@ -146,7 +149,24 @@ class TestFetchIcs:
             patch(f"{SYNC}.assert_host_is_public"),
             patch("httpx.AsyncClient", _client_factory(handler)),
         ):
-            body = await fetch_ics("https://admin.booking.com/a.ics", timeout=5)
+            body = await fetch_ics("https://admin.booking.com/a.ics", timeout=5, channel=BC)
+        assert "VCALENDAR" in body
+
+    async def test_follows_airbnb_redirect(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.host == "www.airbnb.com":
+                return httpx.Response(302, headers={"location": "https://cdn.airbnb.com/b.ics"})
+            return httpx.Response(200, text="BEGIN:VCALENDAR\nEND:VCALENDAR\n")
+
+        with (
+            patch(f"{SYNC}.assert_host_is_public"),
+            patch("httpx.AsyncClient", _client_factory(handler)),
+        ):
+            body = await fetch_ics(
+                "https://www.airbnb.com/calendar/ical/1.ics",
+                timeout=5,
+                channel=BookingChannel.AIRBNB,
+            )
         assert "VCALENDAR" in body
 
     async def test_redirect_to_non_allowlisted_host_rejected(self):
@@ -159,8 +179,34 @@ class TestFetchIcs:
             patch("httpx.AsyncClient", _client_factory(handler)),
             pytest.raises(Exception) as exc,
         ):
-            await fetch_ics("https://admin.booking.com/a.ics", timeout=5)
-        assert "booking.com" in str(exc.value)
+            await fetch_ics("https://admin.booking.com/a.ics", timeout=5, channel=BC)
+        assert "not allowed" in str(exc.value)
+
+    async def test_cyclic_redirect_detected(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            other = "b.ics" if request.url.path == "/a.ics" else "a.ics"
+            return httpx.Response(302, headers={"location": f"https://admin.booking.com/{other}"})
+
+        with (
+            patch(f"{SYNC}.assert_host_is_public"),
+            patch("httpx.AsyncClient", _client_factory(handler)),
+            pytest.raises(FeedFetchError) as exc,
+        ):
+            await fetch_ics("https://admin.booking.com/a.ics", timeout=5, channel=BC)
+        assert "Cyclic redirect" in str(exc.value)
+
+    async def test_oversize_body_rejected(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, text="X" * 5000)
+
+        with (
+            patch(f"{SYNC}.assert_host_is_public"),
+            patch(f"{SYNC}.settings.calendar_sync_max_bytes", 1000),
+            patch("httpx.AsyncClient", _client_factory(handler)),
+            pytest.raises(FeedFetchError) as exc,
+        ):
+            await fetch_ics("https://admin.booking.com/a.ics", timeout=5, channel=BC)
+        assert "exceeds" in str(exc.value)
 
 
 # ---------------------------------------------------------------------------
@@ -201,6 +247,18 @@ def _apply(ctxs):
     for c in ctxs:
         stack.enter_context(c)
     return stack
+
+
+def _channel_booking_crud(existing, ranges=None):
+    """MagicMock booking_crud with every channel method (bulk) wired as AsyncMock."""
+    bc = MagicMock()
+    bc.list_channel_bookings = AsyncMock(return_value=existing)
+    bc.active_platform_ranges = AsyncMock(return_value=ranges or [])
+    bc.bulk_upsert_channel_bookings = AsyncMock()
+    bc.bulk_set_channel_booking_dates = AsyncMock()
+    bc.bulk_cancel_channel_bookings = AsyncMock()
+    bc.bulk_truncate_channel_bookings = AsyncMock()
+    return bc
 
 
 class TestSyncFeedOrchestrator:
@@ -247,10 +305,7 @@ class TestSyncFeedOrchestrator:
         events = [_event("u1", date(2026, 8, 1), date(2026, 8, 4))]
         feed_crud = MagicMock()
         feed_crud.record_sync = AsyncMock()
-        booking_crud = MagicMock()
-        booking_crud.list_channel_bookings = AsyncMock(return_value=[])
-        booking_crud.has_platform_conflict = AsyncMock(return_value=False)
-        booking_crud.upsert_channel_booking = AsyncMock(return_value=(None, True))
+        booking_crud = _channel_booking_crud(existing=[], ranges=[])
         property_data = {"owner_id": str(owner_id), "currency": "EUR"}
         stack = _apply(
             _patched_orchestrator(
@@ -264,7 +319,8 @@ class TestSyncFeedOrchestrator:
         with stack:
             status = await sync_feed(feed)
         assert status == FeedSyncStatus.OK
-        booking_crud.upsert_channel_booking.assert_awaited_once()
+        booking_crud.bulk_upsert_channel_bookings.assert_awaited_once()
+        assert booking_crud.bulk_upsert_channel_bookings.await_args.kwargs["events"] == events
         assert feed_crud.record_sync.await_args.kwargs["content_hash"] == "NEW"
 
     async def test_overbooking_recorded_and_warned(self):
@@ -272,12 +328,10 @@ class TestSyncFeedOrchestrator:
         events = [_event("u1", date(2026, 8, 1), date(2026, 8, 4))]
         feed_crud = MagicMock()
         feed_crud.record_sync = AsyncMock()
-        booking_crud = MagicMock()
-        booking_crud.list_channel_bookings = AsyncMock(return_value=[])
-        booking_crud.has_platform_conflict = AsyncMock(
-            return_value=True
-        )  # overlaps platform booking
-        booking_crud.upsert_channel_booking = AsyncMock(return_value=(None, True))
+        # Existing platform booking overlapping the incoming reservation.
+        booking_crud = _channel_booking_crud(
+            existing=[], ranges=[(date(2026, 8, 2), date(2026, 8, 3))]
+        )
         stack = _apply(
             _patched_orchestrator(
                 events=events,
@@ -287,11 +341,13 @@ class TestSyncFeedOrchestrator:
                 hash_value="NEW",
             )
         )
-        with stack:
+        overbookings = MagicMock()
+        with stack, patch(f"{SYNC}._overbookings", overbookings):
             status = await sync_feed(feed)
         # Overbooking still recorded (reflects reality), not dropped.
         assert status == FeedSyncStatus.OK
-        booking_crud.upsert_channel_booking.assert_awaited_once()
+        booking_crud.bulk_upsert_channel_bookings.assert_awaited_once()
+        overbookings.add.assert_called_once_with(1)
 
     async def test_property_gone_records_error(self):
         feed = _feed_ref(content_hash="OLD")
@@ -345,13 +401,7 @@ class TestSyncFeedOrchestrator:
         incoming = [_event("u1", date(2026, 9, 1), date(2026, 9, 5))]  # only u1 remains, extended
         feed_crud = MagicMock()
         feed_crud.record_sync = AsyncMock()
-        booking_crud = MagicMock()
-        booking_crud.list_channel_bookings = AsyncMock(return_value=existing)
-        booking_crud.has_platform_conflict = AsyncMock(return_value=False)
-        booking_crud.upsert_channel_booking = AsyncMock(return_value=(None, True))
-        booking_crud.set_channel_booking_dates = AsyncMock()
-        booking_crud.cancel_channel_booking = AsyncMock()
-        booking_crud.truncate_channel_booking = AsyncMock()
+        booking_crud = _channel_booking_crud(existing=existing)
         stack = _apply(
             _patched_orchestrator(
                 events=incoming,
@@ -364,12 +414,12 @@ class TestSyncFeedOrchestrator:
         with stack:
             status = await sync_feed(feed)
         assert status == FeedSyncStatus.OK
-        booking_crud.set_channel_booking_dates.assert_awaited_once_with(
-            u1, date(2026, 9, 1), date(2026, 9, 5)
+        booking_crud.bulk_set_channel_booking_dates.assert_awaited_once_with(
+            [(u1, date(2026, 9, 1), date(2026, 9, 5))]
         )
-        booking_crud.cancel_channel_booking.assert_awaited_once_with(u2)
-        booking_crud.truncate_channel_booking.assert_awaited_once_with(u3, TODAY)
-        booking_crud.upsert_channel_booking.assert_not_called()  # no new UIDs
+        booking_crud.bulk_cancel_channel_bookings.assert_awaited_once_with([u2])
+        booking_crud.bulk_truncate_channel_bookings.assert_awaited_once_with([(u3, TODAY)])
+        booking_crud.bulk_upsert_channel_bookings.assert_not_called()  # no new UIDs
 
 
 class TestSweep:
