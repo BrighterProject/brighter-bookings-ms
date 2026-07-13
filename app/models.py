@@ -26,6 +26,7 @@ class BookingChannel(StrEnum):
     PLATFORM = "platform"
     BOOKING_COM = "booking_com"
     AIRBNB = "airbnb"
+    DEV = "dev"
 
 
 class FeedSyncStatus(StrEnum):

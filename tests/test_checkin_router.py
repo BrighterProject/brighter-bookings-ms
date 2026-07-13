@@ -98,6 +98,27 @@ async def test_roster_shows_open_slots_for_new_booking(booking):
     assert all(slot["filled"] is False for slot in body["roster"])
 
 
+async def test_roster_handles_property_with_no_resolved_city(booking):
+    # properties-ms returns city=None when the settlement can't be resolved and
+    # there's no legacy value (the common case for EKATTE-only new properties).
+    # The roster must still render rather than 500 on a null city.
+    app = _build_app(booking)
+
+    class _NoCityClient:
+        async def get_property(self, property_id, user):
+            return {"name": "Mountain Lodge", "city": None}
+
+    async def _client():
+        return _NoCityClient()
+
+    app.dependency_overrides[get_properties_client] = _client
+
+    async with _http(app) as client:
+        resp = await client.get("/checkin/dummy-token")
+    assert resp.status_code == 200
+    assert resp.json()["property_city"] is None
+
+
 async def test_post_guest_fills_a_slot(booking):
     async with _http(_build_app(booking)) as client:
         resp = await client.post("/checkin/dummy-token/guests", json=_guest_payload())
@@ -131,9 +152,7 @@ async def test_post_guest_rejects_when_roster_full(booking):
 
 async def test_delete_frees_the_slot(booking):
     async with _http(_build_app(booking)) as client:
-        created = (
-            await client.post("/checkin/dummy-token/guests", json=_guest_payload())
-        ).json()
+        created = (await client.post("/checkin/dummy-token/guests", json=_guest_payload())).json()
         resp = await client.delete(f"/checkin/dummy-token/guests/{created['guest_id']}")
         assert resp.status_code == 204
 

@@ -19,6 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final
 
+from app import settings
 from app.models import BookingChannel
 
 
@@ -33,9 +34,18 @@ class ChannelSpec:
 CHANNEL_SPECS: Final[dict[BookingChannel, ChannelSpec]] = {
     BookingChannel.BOOKING_COM: ChannelSpec("Booking.com", ("booking.com",)),
     BookingChannel.AIRBNB: ChannelSpec("Airbnb", ("airbnb.com",)),
+    # Demo channel is opt-in (ENABLE_DEV_CALENDAR_CHANNEL): without a spec,
+    # ``is_allowed_feed_host`` rejects every ``dev`` feed, so *.ngrok-free.dev is
+    # never an SSRF-allowed host in production.
+    **(
+        {BookingChannel.DEV: ChannelSpec("Demo", ("ngrok-free.dev",))}
+        if settings.enable_dev_calendar_channel
+        else {}
+    ),
 }
 """Channels that expose an importable iCal feed. ``PLATFORM`` is intentionally
-absent — Brighter's own bookings never come from a feed."""
+absent — Brighter's own bookings never come from a feed. ``DEV`` is present only
+when ``ENABLE_DEV_CALENDAR_CHANNEL`` is set."""
 
 
 def channel_display_name(channel: BookingChannel) -> str:

@@ -239,6 +239,7 @@ uv run tortoise -c main.TORTOISE_ORM migrate
 | `CALENDAR_SYNC_JITTER_MS` | `500` | Max random delay between feeds in a sweep (BTR-41) |
 | `CALENDAR_SYNC_MAX_BYTES` | `5242880` | Hard cap on a fetched iCal body (DoS guard); streamed and aborted past this |
 | `CALENDAR_LOCAL_TZ` | `Europe/Sofia` | Zone for resolving stray timed VEVENTs (all-day feeds are tz-independent) |
+| `ENABLE_DEV_CALENDAR_CHANNEL` | `false` | Set `true` to register the demo `dev` import channel (`*.ngrok-free.dev` allowlist) for the local mock OTA feed. **Never enable in production.** |
 
 ## Git & Branch Workflow
 

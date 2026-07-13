@@ -39,6 +39,13 @@ calendar_sync_jitter_ms = int(os.environ.get("CALENDAR_SYNC_JITTER_MS", "500"))
 # so a malicious/misconfigured origin can never OOM the pod. Booking.com/Airbnb
 # exports for a single unit are a few KB; 5 MiB is a very generous ceiling.
 calendar_sync_max_bytes = int(os.environ.get("CALENDAR_SYNC_MAX_BYTES", str(5 * 1024 * 1024)))
+# Demo-only import channel (BTR-41). When enabled, registers a `dev` calendar
+# channel whose feeds may come from *.ngrok-free.dev, so a local mock OTA server
+# (scripts/mock-ics.py) can drive the sync flow end-to-end. Off by default —
+# never enable in production, or *.ngrok-free.dev becomes an SSRF-allowed host.
+enable_dev_calendar_channel = (
+    os.environ.get("ENABLE_DEV_CALENDAR_CHANNEL", "false").lower() == "true"
+)
 # Calendar dates in feeds without an explicit time are interpreted in this zone.
 # Booking.com/Airbnb exports are all-day VALUE=DATE (tz-independent); this only
 # affects the defensive down-convert of a stray DATE-TIME value. Platform-wide

@@ -251,7 +251,7 @@ class GuestRosterSlot(BaseModel):
 
 class GuestRosterResponse(BaseModel):
     property_name: str
-    property_city: str
+    property_city: str | None = None  # resolved settlement name; null when unresolved
     start_date: date
     end_date: date
     total_slots: int
