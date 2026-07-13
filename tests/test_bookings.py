@@ -385,6 +385,19 @@ class TestUpdateBookingStatus:
             )
         assert resp.status_code == 200
 
+    def test_imported_channel_booking_is_read_only_returns_409(self, admin_client):
+        """Imported (booking_com) bookings are read-only: their lifecycle is owned by
+        the sync engine, so even an admin cannot transition them here (BTR-41)."""
+        imported = booking_model(status="confirmed", channel="booking_com")
+        with patch(CRUD_PATH) as mock_crud:
+            mock_crud.get_booking = AsyncMock(return_value=imported)
+            mock_crud.update_booking_status = AsyncMock()
+            resp = admin_client.patch(
+                f"/bookings/{BOOKING_ID}/status", json={"status": "cancelled"}
+            )
+        assert resp.status_code == 409
+        mock_crud.update_booking_status.assert_not_called()
+
     def test_property_owner_can_refuse_pending_booking(self, client_factory):
         """Property owner can cancel (refuse) a pending booking for their own property."""
         from uuid import uuid4

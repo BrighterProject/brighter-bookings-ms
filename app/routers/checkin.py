@@ -46,7 +46,7 @@ async def get_checkin_roster(
 
     return GuestRosterResponse(
         property_name=(property_data or {}).get("name", ""),
-        property_city=(property_data or {}).get("city", ""),
+        property_city=(property_data or {}).get("city"),
         start_date=booking.start_date,
         end_date=booking.end_date,
         total_slots=booking.num_guests,
@@ -55,9 +55,7 @@ async def get_checkin_roster(
     )
 
 
-@router.post(
-    "/{token}/guests", response_model=GuestRosterSlot, status_code=status.HTTP_201_CREATED
-)
+@router.post("/{token}/guests", response_model=GuestRosterSlot, status_code=status.HTTP_201_CREATED)
 @limiter.limit("30/minute")
 async def add_guest_identity(
     request: Request,

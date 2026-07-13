@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import date
+from collections import defaultdict
+from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -8,13 +9,23 @@ from fastapi import HTTPException, status
 from ms_core import CRUD
 from tortoise.transactions import in_transaction
 
-from app.models import Booking, BookingStatus
+from app.channels import channel_display_name
+from app.models import (
+    CHANNEL_GUEST_USER_ID,
+    Booking,
+    BookingChannel,
+    BookingStatus,
+    ExternalCalendarFeed,
+    FeedSyncStatus,
+)
 from app.schemas import (
     BookingFilters,
     BookingResponse,
     BookingSlot,
     BookingStatusUpdate,
+    CalendarFeedResponse,
 )
+from app.services.ical_parser import ParsedEvent
 
 
 def _overlaps_unavailabilities(
@@ -190,5 +201,155 @@ class BookingCRUD(CRUD[Booking, BookingResponse]):  # type: ignore
     async def delete_booking(self, booking_id: UUID) -> bool:
         return await self.delete_by(id=booking_id)
 
+    # -- Channel imports (BTR-41) ------------------------------------------
+    # These bypass the API status-transition rules by design: the sync engine
+    # owns the lifecycle of imported (booking_com) rows, so it writes their
+    # fields directly rather than going through _assert_transition.
+
+    async def list_channel_bookings(
+        self, property_id: UUID, channel: BookingChannel
+    ) -> list[BookingResponse]:
+        """All imported bookings for a property/channel, keyed later by external_uid."""
+        rows = await Booking.filter(property_id=property_id, channel=channel)
+        return [BookingResponse.model_validate(b, from_attributes=True) for b in rows]
+
+    async def active_platform_ranges(self, property_id: UUID) -> list[tuple[date, date]]:
+        """``(start, end)`` of every active *platform* booking for a property.
+
+        Fetched once per sync so the overbooking check for a whole feed is a single
+        query instead of one per incoming reservation.
+        """
+        rows = await Booking.filter(
+            property_id=property_id,
+            channel=BookingChannel.PLATFORM,
+            status__in=[BookingStatus.PENDING, BookingStatus.CONFIRMED],
+        ).values_list("start_date", "end_date")
+        return [(start, end) for start, end in rows]
+
+    async def bulk_upsert_channel_bookings(
+        self,
+        *,
+        property_id: UUID,
+        property_owner_id: UUID,
+        channel: BookingChannel,
+        currency: str,
+        events: list[ParsedEvent],
+    ) -> None:
+        """Insert freshly-seen imported reservations in a single round-trip.
+
+        ``events`` are the feed's genuinely-new UIDs (the diff already excluded
+        existing ones). ``ignore_conflicts`` keeps the write idempotent against the
+        ``(property_id, channel, external_uid)`` unique constraint should a manual
+        sync race the cron sweep — the next sweep reconciles any skipped row.
+        """
+        if not events:
+            return
+        guest_name = channel_display_name(channel)
+        rows = [
+            Booking(
+                property_id=property_id,
+                property_owner_id=property_owner_id,
+                user_id=CHANNEL_GUEST_USER_ID,
+                channel=channel,
+                external_uid=ev.uid,
+                start_date=ev.start_date,
+                end_date=ev.end_date,
+                status=BookingStatus.CONFIRMED,
+                price_per_night=Decimal("0"),
+                total_price=Decimal("0"),
+                currency=currency,
+                num_guests=1,
+                guest_name=guest_name,
+            )
+            for ev in events
+        ]
+        await Booking.bulk_create(rows, ignore_conflicts=True)
+
+    async def bulk_set_channel_booking_dates(
+        self, updates: list[tuple[UUID, date, date]]
+    ) -> None:
+        """Apply date changes to imported bookings in one statement.
+
+        Also re-confirms a resurrected UID (status back to CONFIRMED).
+        """
+        if not updates:
+            return
+        rows = [
+            Booking(id=bid, start_date=start, end_date=end, status=BookingStatus.CONFIRMED)
+            for bid, start, end in updates
+        ]
+        await Booking.bulk_update(rows, fields=["start_date", "end_date", "status"])
+
+    async def bulk_cancel_channel_bookings(self, booking_ids: list[UUID]) -> None:
+        """CANCEL every listed imported booking — their UIDs vanished before check-in."""
+        if not booking_ids:
+            return
+        await Booking.filter(id__in=booking_ids).update(status=BookingStatus.CANCELLED)
+
+    async def bulk_truncate_channel_bookings(self, truncations: list[tuple[UUID, date]]) -> None:
+        """Shorten mid-stay imported bookings so future nights free up for resale.
+
+        Grouped by target ``end_date`` (the sweep truncates every mid-stay row to
+        ``today``, so this is normally a single UPDATE).
+        """
+        if not truncations:
+            return
+        by_end: dict[date, list[UUID]] = defaultdict(list)
+        for bid, new_end in truncations:
+            by_end[new_end].append(bid)
+        for new_end, ids in by_end.items():
+            await Booking.filter(id__in=ids).update(end_date=new_end)
+
 
 booking_crud = BookingCRUD(Booking, BookingResponse)
+
+
+class CalendarFeedCRUD:
+    """DB operations for external iCal feeds (BTR-41)."""
+
+    async def list_for_property(self, property_id: UUID) -> list[CalendarFeedResponse]:
+        rows = await ExternalCalendarFeed.filter(property_id=property_id)
+        return [CalendarFeedResponse.model_validate(f, from_attributes=True) for f in rows]
+
+    async def create(
+        self, property_id: UUID, channel: BookingChannel, url: str
+    ) -> CalendarFeedResponse:
+        inst = await ExternalCalendarFeed.create(property_id=property_id, channel=channel, url=url)
+        return CalendarFeedResponse.model_validate(inst, from_attributes=True)
+
+    async def get(self, feed_id: UUID) -> ExternalCalendarFeed | None:
+        return await ExternalCalendarFeed.get_or_none(id=feed_id)
+
+    async def delete(self, feed_id: UUID) -> bool:
+        deleted = await ExternalCalendarFeed.filter(id=feed_id).delete()
+        return bool(deleted)
+
+    async def list_active(self) -> list[ExternalCalendarFeed]:
+        """All feeds the sweep should poll — ORM rows so the engine can read/write hash."""
+        return await ExternalCalendarFeed.filter(is_active=True)
+
+    async def record_sync(
+        self,
+        feed_id: UUID,
+        *,
+        status: FeedSyncStatus,
+        content_hash: str | None = None,
+        error: str | None = None,
+        synced_at: datetime,
+    ) -> None:
+        """Persist the outcome of a sync attempt.
+
+        ``content_hash`` is only advanced on a successful parse; on error it is
+        left as-is so the next sweep re-processes the feed rather than short-circuiting.
+        """
+        updates: dict[str, object] = {
+            "last_status": status,
+            "last_error": (error[:1024] if error else None),
+            "last_synced_at": synced_at,
+        }
+        if content_hash is not None:
+            updates["content_hash"] = content_hash
+        await ExternalCalendarFeed.filter(id=feed_id).update(**updates)
+
+
+calendar_feed_crud = CalendarFeedCRUD()

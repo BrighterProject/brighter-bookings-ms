@@ -1,7 +1,7 @@
 import asyncio
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Literal
+from typing import Literal, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -32,6 +32,7 @@ from app.i18n import format_date, format_short_date
 from app.limiter import limiter
 from app.pricing_client import PricingClient, PricingGapError, get_pricing_client
 from app.schemas import (
+    BookingChannel,
     BookingCreate,
     BookingEnriched,
     BookingFilters,
@@ -343,7 +344,7 @@ async def get_occupied_property_ids(
         start_date__lt=to_date,
         end_date__gt=from_date,
     ).values_list("property_id", flat=True)
-    return list(set(property_ids))  # type: ignore[return-value]
+    return list(set(cast("list[UUID]", property_ids)))
 
 
 @router.get("/slots", response_model=list[BookingSlot])
@@ -536,7 +537,7 @@ async def create_booking(
     return booking
 
 
-@router.get("/{booking_id}", response_model=BookingEnriched)
+@router.get("/{booking_id:uuid}", response_model=BookingEnriched)
 @limiter.limit("200/minute")
 async def get_booking(
     request: Request,
@@ -664,6 +665,15 @@ async def update_booking_status(
     booking = await booking_crud.get_booking(booking_id)
     if not booking:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
+
+    # Imported channel bookings are read-only here: their lifecycle is owned by the
+    # calendar sync engine, and cancelling on our side would not free the date on
+    # Booking.com. Reject any user-initiated status transition on them (BTR-41).
+    if booking.channel != BookingChannel.PLATFORM:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Imported channel bookings are read-only and cannot change status here.",
+        )
 
     _assert_transition(
         old_status=booking.status,
