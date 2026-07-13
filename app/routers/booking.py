@@ -1,7 +1,7 @@
 import asyncio
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Literal
+from typing import Literal, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -344,7 +344,7 @@ async def get_occupied_property_ids(
         start_date__lt=to_date,
         end_date__gt=from_date,
     ).values_list("property_id", flat=True)
-    return list(set(property_ids))  # type: ignore[return-value]
+    return list(set(cast("list[UUID]", property_ids)))
 
 
 @router.get("/slots", response_model=list[BookingSlot])
