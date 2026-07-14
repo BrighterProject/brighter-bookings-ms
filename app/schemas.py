@@ -6,7 +6,13 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    model_validator,
+)
 from pydantic_core import InitErrorDetails
 from pydantic_core import ValidationError as CoreValidationError
 
@@ -15,7 +21,8 @@ from app.egn import (
     is_valid_egn_checksum,
     is_valid_lnch_checksum,
 )
-from app.models import DocumentType, Gender
+from app.feed_url import FeedUrlError, validate_feed_url
+from app.models import BookingChannel, DocumentType, FeedSyncStatus, Gender
 
 # Never let a validation error echo raw government-ID values back to a caller.
 # pydantic attaches the offending `input` to every error — for a model-level
@@ -27,8 +34,7 @@ SENSITIVE_IDENTITY_FIELDS: frozenset[str] = frozenset({"document_number", "pin_e
 def _mask_input(value: Any) -> Any:
     if isinstance(value, dict):
         return {
-            key: ("***" if key in SENSITIVE_IDENTITY_FIELDS else val)
-            for key, val in value.items()
+            key: ("***" if key in SENSITIVE_IDENTITY_FIELDS else val) for key, val in value.items()
         }
     return value
 
@@ -107,6 +113,8 @@ class BookingResponse(BaseModel):
     special_requests: str | None
     gap_adjustment_pct: Decimal = Decimal("0")
     payment_method: str | None = None
+    channel: BookingChannel = BookingChannel.PLATFORM
+    external_uid: str | None = None
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -191,7 +199,9 @@ class GuestIdentityCreate(BaseModel):
             if encoded is not None:
                 egn_dob, egn_gender = encoded
                 if egn_dob != self.date_of_birth:
-                    raise ValueError("date_of_birth does not match the birth date encoded in pin_egn")
+                    raise ValueError(
+                        "date_of_birth does not match the birth date encoded in pin_egn"
+                    )
                 if egn_gender != self.gender:
                     raise ValueError("gender does not match the gender encoded in pin_egn")
             elif not is_valid_lnch_checksum(self.pin_egn):
@@ -241,7 +251,7 @@ class GuestRosterSlot(BaseModel):
 
 class GuestRosterResponse(BaseModel):
     property_name: str
-    property_city: str
+    property_city: str | None = None  # resolved settlement name; null when unresolved
     start_date: date
     end_date: date
     total_slots: int
@@ -252,3 +262,36 @@ class GuestRosterResponse(BaseModel):
 class CheckinLinkResponse(BaseModel):
     token: str
     expires_at: date
+
+
+class CalendarFeedCreate(BaseModel):
+    """Owner request to link an external iCal export URL to a property (BTR-41)."""
+
+    property_id: UUID
+    channel: BookingChannel = BookingChannel.BOOKING_COM
+    url: str = Field(max_length=2048)
+
+    @model_validator(mode="after")
+    def _validate_url(self) -> CalendarFeedCreate:
+        # SSRF guard: https + the selected channel's host allowlist. Redirects are
+        # re-checked per hop at fetch time (see app.services.calendar_sync).
+        try:
+            validate_feed_url(self.url, self.channel)
+        except FeedUrlError as exc:
+            raise ValueError(str(exc)) from exc
+        return self
+
+
+class CalendarFeedResponse(BaseModel):
+    id: UUID
+    property_id: UUID
+    channel: BookingChannel
+    url: str
+    is_active: bool
+    last_synced_at: datetime | None
+    last_status: FeedSyncStatus | None
+    last_error: str | None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

@@ -61,3 +61,6 @@ dmypy.json
 # Ruff
 .ruff_cache/
 .worktrees
+
+# Generated OpenAPI export (produced on demand for brighter-docs)
+openapi.json

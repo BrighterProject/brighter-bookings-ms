@@ -1,6 +1,7 @@
 import asyncio
 from datetime import date, timedelta
 from decimal import Decimal
+from typing import Literal, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -29,8 +30,9 @@ from app.deps import (
 )
 from app.i18n import format_date, format_short_date
 from app.limiter import limiter
-from app.pricing_client import PricingClient, get_pricing_client
+from app.pricing_client import PricingClient, PricingGapError, get_pricing_client
 from app.schemas import (
+    BookingChannel,
     BookingCreate,
     BookingEnriched,
     BookingFilters,
@@ -342,7 +344,7 @@ async def get_occupied_property_ids(
         start_date__lt=to_date,
         end_date__gt=from_date,
     ).values_list("property_id", flat=True)
-    return list(set(property_ids))  # type: ignore[return-value]
+    return list(set(cast("list[UUID]", property_ids)))
 
 
 @router.get("/slots", response_model=list[BookingSlot])
@@ -372,6 +374,7 @@ async def get_property_slots(
 async def list_bookings(
     request: Request,
     filters: BookingFilters = Depends(),
+    view: Literal["guest", "owner"] | None = Query(default=None),
     current_user: CurrentUser = Depends(can_read_or_manage_booking),
     properties_client: PropertiesClient = Depends(get_properties_client),
     users_client: UsersClient = Depends(get_users_client),
@@ -383,6 +386,10 @@ async def list_bookings(
 
     if is_admin:
         bookings = await booking_crud.list_bookings(filters=filters)
+    elif view == "guest":
+        # Property owner explicitly asking for bookings THEY made as a guest,
+        # rather than bookings made on their own properties.
+        bookings = await booking_crud.list_bookings(filters=filters, user_id=current_user.id)
     elif is_manager:
         # Property owners see bookings for their properties regardless of also having
         # bookings:read (which DEFAULT_OWNER_SCOPES includes for customer use)
@@ -472,14 +479,22 @@ async def create_booking(
         payload.property_id, current_user
     )
 
-    # 3. Resolve dynamic pricing; falls back to flat rate if properties-ms is unavailable
-    base_price = Decimal(str(property["price_per_night"]))
-    resolved_total, avg_price_per_night = await pricing_client.resolve(
-        property_id=payload.property_id,
-        start_date=payload.start_date,
-        end_date=payload.end_date,
-        base_price=base_price,
-    )
+    # 3. Resolve dynamic pricing from the calendar. A stay touching unpriced
+    #    nights is rejected — there is no base-price fallback.
+    try:
+        resolved_total, avg_price_per_night = await pricing_client.resolve(
+            property_id=payload.property_id,
+            start_date=payload.start_date,
+            end_date=payload.end_date,
+        )
+    except PricingGapError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "Selected dates include nights with no price set.",
+                "unpriced_dates": exc.unpriced_dates,
+            },
+        ) from exc
 
     # 3b. Apply gap tax if applicable
     gap_tax_pct = Decimal(str(property.get("gap_tax_pct", 0)))
@@ -522,7 +537,7 @@ async def create_booking(
     return booking
 
 
-@router.get("/{booking_id}", response_model=BookingEnriched)
+@router.get("/{booking_id:uuid}", response_model=BookingEnriched)
 @limiter.limit("200/minute")
 async def get_booking(
     request: Request,
@@ -650,6 +665,15 @@ async def update_booking_status(
     booking = await booking_crud.get_booking(booking_id)
     if not booking:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
+
+    # Imported channel bookings are read-only here: their lifecycle is owned by the
+    # calendar sync engine, and cancelling on our side would not free the date on
+    # Booking.com. Reject any user-initiated status transition on them (BTR-41).
+    if booking.channel != BookingChannel.PLATFORM:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Imported channel bookings are read-only and cannot change status here.",
+        )
 
     _assert_transition(
         old_status=booking.status,
